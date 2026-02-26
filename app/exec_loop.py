@@ -1,3 +1,4 @@
+import difflib
 import time
 from collections import defaultdict
 
@@ -8,6 +9,86 @@ from config import MAX_FAILURES_BEFORE_REPLAN, MAX_REPLANS, MAX_STEPS, SYSTEM_PR
 from models import Step, format_checklist
 from planner import _apply_replan
 from utils import MetricsLogger, _sanitize, _task_message
+
+# Mapping of commonly hallucinated tool names → correct MCP tool names.
+# Observed across llama3.2:3b, mistral and other small open-weight models.
+_TOOL_NAME_ALIAS: dict[str, str] = {
+    # filesystem
+    "read_text_file":           "read_file",
+    "read_file_content":        "read_file",
+    "write_text_file":          "write_file",
+    "create_file":              "write_file",
+    "save_file":                "write_file",
+    "list_files":               "list_directory",
+    "list_directory_with_sizes": "list_directory",
+    "ls":                       "list_directory",
+    "delete_file":              "remove_file",
+    # shell
+    "run_command":              "execute_command",
+    "run_shell":                "execute_command",
+    "shell_execute":            "execute_command",
+    "bash":                     "execute_command",
+    "exec":                     "execute_command",
+    "run_bash":                 "execute_command",
+    # websearch
+    "search_web":               "web_search",
+    "internet_search":          "web_search",
+    "get_page":                 "fetch_page",
+    "fetch_url":                "fetch_page",
+    "open_url":                 "fetch_page",
+    # time
+    "current_time":             "get_current_datetime",
+    "get_time":                 "get_current_datetime",
+    "get_datetime":             "get_current_datetime",
+    "now":                      "get_current_datetime",
+    # sqlite
+    "sql_query":                "query",
+    "execute_sql":              "query",
+    "run_sql":                  "query",
+    # memory
+    "store_memory":             "remember",
+    "save_memory":              "remember",
+    "get_memory":               "recall",
+    "retrieve_memory":          "recall",
+    "delete_memory":            "forget",
+    "remove_memory":            "forget",
+}
+
+# Minimum similarity ratio accepted by difflib fuzzy fallback.
+# 0.80 is intentionally conservative to avoid mis-corrections.
+_FUZZY_CUTOFF = 0.80
+
+
+def _fix_tool_name(tc: dict, tool_map: dict) -> tuple[dict, str | None]:
+    """Try to correct a hallucinated tool name before invocation.
+
+    Correction strategy (in order):
+    1. Exact match in tool_map  → no change needed.
+    2. Alias table lookup       → deterministic, high-confidence correction.
+    3. difflib fuzzy match      → catches variations not in the alias table.
+
+    Returns (fixed_tc, fix_description) where fix_description is None when
+    no correction was applied.  Uses '→' for alias fixes and '~>' for fuzzy
+    fixes so they are distinguishable in logs and metrics.
+    """
+    name = tc["name"]
+    if name in tool_map:
+        return tc, None
+
+    # Strategy 1: alias table
+    if name in _TOOL_NAME_ALIAS:
+        corrected = _TOOL_NAME_ALIAS[name]
+        if corrected in tool_map:
+            return {**tc, "name": corrected}, f"{name} → {corrected}"
+
+    # Strategy 2: difflib fuzzy match (conservative cutoff)
+    candidates = difflib.get_close_matches(name, tool_map.keys(), n=1, cutoff=_FUZZY_CUTOFF)
+    if candidates:
+        corrected = candidates[0]
+        return {**tc, "name": corrected}, f"{name} ~> {corrected}"
+
+    return tc, None
+
 
 # Mapping of commonly hallucinated argument names → correct schema names.
 # These are patterns observed across llama3, mistral and other open-weight models.
@@ -156,6 +237,11 @@ async def run_exec_loop(
 
         tc = response.tool_calls[0]
 
+        # --- Tool Name Fixer: correct hallucinated tool names ---
+        tc, tool_name_fix = _fix_tool_name(tc, tool_map)
+        if tool_name_fix:
+            logger.warning(f"[tool_fix] {tool_name_fix}")
+
         # --- Input Fixer: normalize argument names before invocation ---
         tc, arg_fixes = _fix_args(tc, tool_map)
         if arg_fixes:
@@ -171,6 +257,7 @@ async def run_exec_loop(
             turn=turn + 1,
             tool_called=True,
             tool_name=tc["name"],
+            tool_name_fix=tool_name_fix,
             arg_fixes=arg_fixes,
             is_error=is_error,
         )
