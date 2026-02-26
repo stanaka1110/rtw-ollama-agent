@@ -1,10 +1,3 @@
-"""
-LangChain + Ollama + MCP オーケストレーター (Plan-and-Execute with Replan)
-
-使い方:
-  python main.py "<プロンプト>"
-"""
-
 import argparse
 import asyncio
 

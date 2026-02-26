@@ -1,5 +1,3 @@
-"""MCP Memory サーバ設定"""
-
 SERVER_CONFIG = {
     "command": "bash",
     "args": [

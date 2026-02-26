@@ -5,7 +5,8 @@ from collections import defaultdict
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import ToolException
 
-from config import MAX_FAILURES_BEFORE_REPLAN, MAX_REPLANS, MAX_STEPS, SYSTEM_PROMPT
+from config import MAX_FAILURES_BEFORE_REPLAN, MAX_REPLANS, MAX_STEPS
+from prompts import SYSTEM_PROMPT
 from models import Step, format_checklist
 from planner import _apply_replan
 from utils import MetricsLogger, _sanitize, _task_message
@@ -181,6 +182,17 @@ def _update_step(steps: list[Step], idx: int, is_error: bool, result_str: str) -
     return idx
 
 
+def _build_watchdog_hint(tool_failure_counts: dict) -> str:
+    repeated = {k: v for k, v in tool_failure_counts.items() if v >= 2}
+    if not repeated:
+        return ""
+    return (
+        f"[WATCHDOG] The following tools have failed {repeated} times total. "
+        "Do NOT call them with the same arguments again. "
+        "Use a completely different tool or a different approach."
+    )
+
+
 async def run_exec_loop(
     prompt: str, steps: list[Step], tools: list, tool_map: dict, model, logger
 ) -> str | None:
@@ -215,13 +227,7 @@ async def run_exec_loop(
                 reason = "pending steps remain" if pending_steps else "gave up after error"
                 logger.info(f"[replan triggered] {reason} (replan {replan_count}/{MAX_REPLANS})")
 
-                repeated = {k: v for k, v in tool_failure_counts.items() if v >= 2}
-                watchdog_hint = (
-                    f"[WATCHDOG] The following tools have failed {repeated} times total. "
-                    "Do NOT call them with the same arguments again. "
-                    "Use a completely different tool or a different approach."
-                ) if repeated else ""
-
+                watchdog_hint = _build_watchdog_hint(tool_failure_counts)
                 steps, current_step_idx = await _apply_replan(
                     prompt, steps, execution_history, tools, model, logger,
                     watchdog_hint=watchdog_hint,
@@ -278,13 +284,7 @@ async def run_exec_loop(
                 replan_count += 1
                 logger.info(f"[replan triggered] {consecutive_failures} consecutive failures (replan {replan_count}/{MAX_REPLANS})")
 
-                # Build watchdog hint for tools that have failed 2+ times total.
-                repeated = {k: v for k, v in tool_failure_counts.items() if v >= 2}
-                watchdog_hint = (
-                    f"[WATCHDOG] The following tools have failed {repeated} times total. "
-                    "Do NOT call them with the same arguments again. "
-                    "Use a completely different tool or a different approach."
-                ) if repeated else ""
+                watchdog_hint = _build_watchdog_hint(tool_failure_counts)
                 if watchdog_hint:
                     logger.warning(f"[watchdog] {watchdog_hint}")
 

@@ -3,7 +3,7 @@ import time
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from config import PLAN_PROMPT, REPLAN_PROMPT
+from prompts import PLAN_PROMPT, REPLAN_PROMPT
 from models import Step, format_checklist, parse_steps
 from utils import _tool_descriptions
 

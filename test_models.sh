@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MODELS=("qwen2.5:7b" "qwen2.5:14b" "mistral:7b" "llama3.2:3b")
+MODELS=("qwen2.5:7b" "qwen2.5:14b" "llama3.2:3b")
 TASKS=(
+    # [CHAT]  Router → Chat path: ツール不使用で即答できるか
+    "こんにちは"
+    # [AGENT] 単一ツール: time ツール1回で完結
     "現在時刻を教えて"
+    # [AGENT] マルチステップ: ファイル書き込み + シェル実行
     "1から5までの2乗を計算するPythonスクリプトを /data/test.py に書いて実行して"
 )
 
@@ -61,72 +65,46 @@ docker exec langchain_app sh -c \
 
 # ── メトリクス集計（今回分のスナップショットを対象に表示）─────────────────
 if [ -s "$METRICS_SNAPSHOT" ]; then
+    METRICS_SUMMARY=$(python3 - "$METRICS_SNAPSHOT" <<'PYEOF'
+import sys, json, collections
+
+records = []
+with open(sys.argv[1], encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if line:
+            try:
+                records.append(json.loads(line))
+            except Exception:
+                pass
+
+stats = collections.defaultdict(lambda: {"tca": [], "arg_fit": [], "step_cr": [], "count": 0})
+for r in records:
+    m = r.get("model", "unknown")
+    stats[m]["tca"].append(r.get("tca", 0))
+    stats[m]["arg_fit"].append(r.get("arg_fit_rate", 0))
+    stats[m]["step_cr"].append(r.get("step_completion_rate", 0))
+    stats[m]["count"] += 1
+
+avg = lambda lst: round(sum(lst) / len(lst), 3) if lst else 0.0
+
+print(f"{'Model':<20} {'Runs':>5} {'TCA':>7} {'ArgFit':>8} {'StepCR':>8}")
+print("-" * 52)
+for model, d in sorted(stats.items()):
+    print(f"{model:<20} {d['count']:>5} {avg(d['tca']):>7.3f} {avg(d['arg_fit']):>8.3f} {avg(d['step_cr']):>8.3f}")
+print("=" * 52)
+PYEOF
+)
+
     echo ""
     echo "========================================"
     echo " メトリクスサマリー ($METRICS_SNAPSHOT)"
     echo "========================================"
-    python3 - "$METRICS_SNAPSHOT" <<'PYEOF'
-import sys, json, collections
+    echo "$METRICS_SUMMARY"
 
-records = []
-with open(sys.argv[1], encoding="utf-8") as f:
-    for line in f:
-        line = line.strip()
-        if line:
-            try:
-                records.append(json.loads(line))
-            except Exception:
-                pass
-
-stats = collections.defaultdict(lambda: {"tca": [], "arg_fit": [], "step_cr": [], "count": 0})
-for r in records:
-    m = r.get("model", "unknown")
-    stats[m]["tca"].append(r.get("tca", 0))
-    stats[m]["arg_fit"].append(r.get("arg_fit_rate", 0))
-    stats[m]["step_cr"].append(r.get("step_completion_rate", 0))
-    stats[m]["count"] += 1
-
-avg = lambda lst: round(sum(lst) / len(lst), 3) if lst else 0.0
-
-print(f"{'Model':<20} {'Runs':>5} {'TCA':>7} {'ArgFit':>8} {'StepCR':>8}")
-print("-" * 52)
-for model, d in sorted(stats.items()):
-    print(f"{model:<20} {d['count']:>5} {avg(d['tca']):>7.3f} {avg(d['arg_fit']):>8.3f} {avg(d['step_cr']):>8.3f}")
-print("=" * 52)
-PYEOF
-
-    # メトリクスサマリーを結果ファイルにも保存
     echo "" >> "$RESULTS_FILE"
     echo "## メトリクスサマリー" >> "$RESULTS_FILE"
-    python3 - "$METRICS_SNAPSHOT" >> "$RESULTS_FILE" <<'PYEOF'
-import sys, json, collections
-
-records = []
-with open(sys.argv[1], encoding="utf-8") as f:
-    for line in f:
-        line = line.strip()
-        if line:
-            try:
-                records.append(json.loads(line))
-            except Exception:
-                pass
-
-stats = collections.defaultdict(lambda: {"tca": [], "arg_fit": [], "step_cr": [], "count": 0})
-for r in records:
-    m = r.get("model", "unknown")
-    stats[m]["tca"].append(r.get("tca", 0))
-    stats[m]["arg_fit"].append(r.get("arg_fit_rate", 0))
-    stats[m]["step_cr"].append(r.get("step_completion_rate", 0))
-    stats[m]["count"] += 1
-
-avg = lambda lst: round(sum(lst) / len(lst), 3) if lst else 0.0
-
-print(f"{'Model':<20} {'Runs':>5} {'TCA':>7} {'ArgFit':>8} {'StepCR':>8}")
-print("-" * 52)
-for model, d in sorted(stats.items()):
-    print(f"{model:<20} {d['count']:>5} {avg(d['tca']):>7.3f} {avg(d['arg_fit']):>8.3f} {avg(d['step_cr']):>8.3f}")
-print("=" * 52)
-PYEOF
+    echo "$METRICS_SUMMARY" >> "$RESULTS_FILE"
 fi
 
 echo ""
