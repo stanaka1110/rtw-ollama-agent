@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Runtime data
+workspace/
+app/logs/
+
+# Env
+.env
