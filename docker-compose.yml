@@ -68,7 +68,7 @@ services:
       - "8000:8000"
     user: "1000:1000"
     group_add:
-      - "1001"  # docker group: access to /var/run/docker.sock
+      - "${DOCKER_GID}"  # docker group: access to /var/run/docker.sock
     volumes:
       - ./app:/app
       - /var/run/docker.sock:/var/run/docker.sock
