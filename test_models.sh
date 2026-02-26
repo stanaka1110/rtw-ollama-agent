@@ -43,3 +43,44 @@ echo ""
 echo "========================================"
 echo "テスト完了。結果: $RESULTS_FILE"
 echo "========================================"
+
+# ── メトリクス集計 ──────────────────────────────────────────────────────────
+# metrics.jsonl から最新レコードをモデル別に集計して表示する。
+# python3 と jq が使用可能な場合のみ実行する。
+METRICS_FILE="$(docker exec langchain_app sh -c 'cat /app/logs/metrics.jsonl 2>/dev/null' || true)"
+
+if [ -n "$METRICS_FILE" ]; then
+    echo ""
+    echo "========================================"
+    echo " メトリクスサマリー (metrics.jsonl)"
+    echo "========================================"
+    echo "$METRICS_FILE" | python3 - <<'PYEOF'
+import sys, json, collections
+
+records = []
+for line in sys.stdin:
+    line = line.strip()
+    if line:
+        try:
+            records.append(json.loads(line))
+        except Exception:
+            pass
+
+# Aggregate by model (latest N records)
+stats = collections.defaultdict(lambda: {"tca": [], "arg_fit": [], "step_cr": [], "count": 0})
+for r in records:
+    m = r.get("model", "unknown")
+    stats[m]["tca"].append(r.get("tca", 0))
+    stats[m]["arg_fit"].append(r.get("arg_fit_rate", 0))
+    stats[m]["step_cr"].append(r.get("step_completion_rate", 0))
+    stats[m]["count"] += 1
+
+avg = lambda lst: round(sum(lst) / len(lst), 3) if lst else 0.0
+
+print(f"{'Model':<20} {'Runs':>5} {'TCA':>7} {'ArgFit':>8} {'StepCR':>8}")
+print("-" * 52)
+for model, d in sorted(stats.items()):
+    print(f"{model:<20} {d['count']:>5} {avg(d['tca']):>7.3f} {avg(d['arg_fit']):>8.3f} {avg(d['step_cr']):>8.3f}")
+print("=" * 52)
+PYEOF
+fi

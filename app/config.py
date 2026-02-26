@@ -44,4 +44,18 @@ Rules:
 1. Always use tools — never just describe what you would do.
 2. Call ONE tool at a time and wait for the result before calling the next.
 3. Follow the execution plan step by step until all steps are complete.
-4. You MUST respond ONLY in Japanese. Never use Chinese in your response."""
+4. You MUST respond ONLY in Japanese. Never use Chinese in your response.
+
+## Tool call examples (correct argument names)
+
+Example 1 — Run a shell command:
+<tool_call>
+{"name": "execute_command", "arguments": {"command": "python3 /data/test.py", "cwd": "/data", "shell": "bash"}}
+</tool_call>
+
+Example 2 — Write a file:
+<tool_call>
+{"name": "write_file", "arguments": {"path": "/data/hello.py", "content": "print('hello')"}}
+</tool_call>
+
+IMPORTANT: Use EXACTLY these argument names. Do NOT use "cmd", "dir", "filepath", "text", or any other variant."""
