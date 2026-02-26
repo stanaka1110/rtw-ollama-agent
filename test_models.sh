@@ -7,8 +7,17 @@ TASKS=(
     "1から5までの2乗を計算するPythonスクリプトを /data/test.py に書いて実行して"
 )
 
-RESULTS_FILE="model_test_results.txt"
+# ── 出力先ディレクトリ：実行日時ごとに独立したフォルダを作成 ─────────────
+RUN_DIR="test_results/$(date '+%Y%m%d_%H%M%S')"
+mkdir -p "$RUN_DIR"
+RESULTS_FILE="$RUN_DIR/model_test_results.txt"
+
 echo "# モデルテスト結果 $(date '+%Y-%m-%d %H:%M')" > "$RESULTS_FILE"
+echo "出力先: $RUN_DIR"
+
+# テスト開始前の metrics.jsonl 行数を記録（今回分だけ抽出するため）
+METRICS_LINES_BEFORE=$(docker exec langchain_app sh -c \
+    'wc -l < /app/logs/metrics.jsonl 2>/dev/null || echo 0')
 
 for MODEL in "${MODELS[@]}"; do
     echo ""
@@ -44,29 +53,64 @@ echo "========================================"
 echo "テスト完了。結果: $RESULTS_FILE"
 echo "========================================"
 
-# ── メトリクス集計 ──────────────────────────────────────────────────────────
-# metrics.jsonl から最新レコードをモデル別に集計して表示する。
-# python3 と jq が使用可能な場合のみ実行する。
-METRICS_FILE="$(docker exec langchain_app sh -c 'cat /app/logs/metrics.jsonl 2>/dev/null' || true)"
+# ── 今回のテスト分だけ metrics.jsonl から抽出してスナップショット保存 ──────
+METRICS_SNAPSHOT="$RUN_DIR/metrics_snapshot.jsonl"
+docker exec langchain_app sh -c \
+    "tail -n +$(( METRICS_LINES_BEFORE + 1 )) /app/logs/metrics.jsonl 2>/dev/null || true" \
+    > "$METRICS_SNAPSHOT"
 
-if [ -n "$METRICS_FILE" ]; then
+# ── メトリクス集計（今回分のスナップショットを対象に表示）─────────────────
+if [ -s "$METRICS_SNAPSHOT" ]; then
     echo ""
     echo "========================================"
-    echo " メトリクスサマリー (metrics.jsonl)"
+    echo " メトリクスサマリー ($METRICS_SNAPSHOT)"
     echo "========================================"
-    echo "$METRICS_FILE" | python3 - <<'PYEOF'
+    python3 - "$METRICS_SNAPSHOT" <<'PYEOF'
 import sys, json, collections
 
 records = []
-for line in sys.stdin:
-    line = line.strip()
-    if line:
-        try:
-            records.append(json.loads(line))
-        except Exception:
-            pass
+with open(sys.argv[1], encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if line:
+            try:
+                records.append(json.loads(line))
+            except Exception:
+                pass
 
-# Aggregate by model (latest N records)
+stats = collections.defaultdict(lambda: {"tca": [], "arg_fit": [], "step_cr": [], "count": 0})
+for r in records:
+    m = r.get("model", "unknown")
+    stats[m]["tca"].append(r.get("tca", 0))
+    stats[m]["arg_fit"].append(r.get("arg_fit_rate", 0))
+    stats[m]["step_cr"].append(r.get("step_completion_rate", 0))
+    stats[m]["count"] += 1
+
+avg = lambda lst: round(sum(lst) / len(lst), 3) if lst else 0.0
+
+print(f"{'Model':<20} {'Runs':>5} {'TCA':>7} {'ArgFit':>8} {'StepCR':>8}")
+print("-" * 52)
+for model, d in sorted(stats.items()):
+    print(f"{model:<20} {d['count']:>5} {avg(d['tca']):>7.3f} {avg(d['arg_fit']):>8.3f} {avg(d['step_cr']):>8.3f}")
+print("=" * 52)
+PYEOF
+
+    # メトリクスサマリーを結果ファイルにも保存
+    echo "" >> "$RESULTS_FILE"
+    echo "## メトリクスサマリー" >> "$RESULTS_FILE"
+    python3 - "$METRICS_SNAPSHOT" >> "$RESULTS_FILE" <<'PYEOF'
+import sys, json, collections
+
+records = []
+with open(sys.argv[1], encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if line:
+            try:
+                records.append(json.loads(line))
+            except Exception:
+                pass
+
 stats = collections.defaultdict(lambda: {"tca": [], "arg_fit": [], "step_cr": [], "count": 0})
 for r in records:
     m = r.get("model", "unknown")
@@ -84,3 +128,8 @@ for model, d in sorted(stats.items()):
 print("=" * 52)
 PYEOF
 fi
+
+echo ""
+echo "保存先フォルダ: $RUN_DIR"
+echo "  - model_test_results.txt  ... テキスト結果"
+echo "  - metrics_snapshot.jsonl  ... 今回分の生メトリクス"

@@ -52,12 +52,18 @@ async def replan(
     execution_history: list[str],
     tools: list,
     model,
+    watchdog_hint: str = "",
 ) -> str:
     checklist = format_checklist(steps)
     history_text = "\n".join(execution_history[-10:])  # 直近10件に絞る
+
+    # Prepend watchdog alert when repeated tool failures have been detected.
+    watchdog_block = f"{watchdog_hint}\n\n" if watchdog_hint else ""
+
     messages = [
         SystemMessage(content=REPLAN_PROMPT.format(tool_descriptions=_tool_descriptions(tools))),
         HumanMessage(content=(
+            f"{watchdog_block}"
             f"Original task: {prompt}\n\n"
             f"Current checklist:\n{checklist}\n\n"
             f"Recent execution history:\n{history_text}\n\n"
@@ -72,9 +78,13 @@ async def replan(
 
 
 async def _apply_replan(
-    prompt, steps, execution_history, tools, model, logger
+    prompt, steps, execution_history, tools, model, logger,
+    watchdog_hint: str = "",
 ) -> tuple[list[Step], int]:
-    new_plan_text = await replan(prompt, steps, execution_history, tools, model)
+    new_plan_text = await replan(
+        prompt, steps, execution_history, tools, model,
+        watchdog_hint=watchdog_hint,
+    )
     new_steps = parse_steps(new_plan_text)
     done_steps = [s for s in steps if s.status == "done"]
     merged = done_steps + new_steps
