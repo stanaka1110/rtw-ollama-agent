@@ -1,12 +1,19 @@
+import logging
+import time
+
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from config import PLAN_PROMPT, REPLAN_PROMPT
 from models import Step, format_checklist, parse_steps
 from utils import _tool_descriptions
 
+logger = logging.getLogger("agent")
+
 
 async def gather_current_state(tool_map: dict) -> str:
     parts = []
+    t0 = time.perf_counter()
+    logger.info("[gather_state] start")
     for tool_name, label, args in [
         ("list_tables",    "SQLite tables",     {}),
         ("list_directory", "Files in /data",    {"path": "/data"}),
@@ -19,6 +26,7 @@ async def gather_current_state(tool_map: dict) -> str:
             parts.append(f"[{label}]\n{result}")
         except Exception as e:
             parts.append(f"[{label}]\n(error: {e})")
+    logger.info(f"[gather_state] done in {time.perf_counter() - t0:.1f}s")
     return "\n\n".join(parts) if parts else "(no state available)"
 
 
@@ -31,7 +39,11 @@ async def make_plan(prompt: str, tools: list, tool_map: dict, model) -> str:
         )),
         HumanMessage(content=prompt),
     ]
-    return (await model.ainvoke(messages)).content
+    logger.info("[plan:llm] start")
+    t0 = time.perf_counter()
+    result = (await model.ainvoke(messages)).content
+    logger.info(f"[plan:llm] done in {time.perf_counter() - t0:.1f}s")
+    return result
 
 
 async def replan(
@@ -52,7 +64,11 @@ async def replan(
             "Create a revised plan for the remaining ⏳ and ❌ steps only."
         )),
     ]
-    return (await model.ainvoke(messages)).content
+    logger.info("[replan:llm] start")
+    t0 = time.perf_counter()
+    result = (await model.ainvoke(messages)).content
+    logger.info(f"[replan:llm] done in {time.perf_counter() - t0:.1f}s")
+    return result
 
 
 async def _apply_replan(

@@ -1,3 +1,5 @@
+import time
+
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import ToolException
 
@@ -46,8 +48,11 @@ async def run_exec_loop(
         HumanMessage(content=_task_message(prompt, steps)),
     ]
 
-    for _ in range(MAX_STEPS):
+    for turn in range(MAX_STEPS):
+        logger.info(f"[exec:llm] start (turn {turn + 1}, step {current_step_idx + 1}/{len(steps)})")
+        t0 = time.perf_counter()
         response = await llm_with_tools.ainvoke(messages)
+        logger.info(f"[exec:llm] done in {time.perf_counter() - t0:.1f}s")
 
         if not response.tool_calls:
             pending_steps = [s for s in steps if s.status == "pending"]
