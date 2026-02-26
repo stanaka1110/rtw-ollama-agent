@@ -14,7 +14,7 @@ from servers import (
 from utils import setup_logging
 
 
-async def run(prompt: str) -> None:
+async def run(prompt: str) -> str | None:
     logger = setup_logging()
     model = llm.get_llm()
 
@@ -32,4 +32,4 @@ async def run(prompt: str) -> None:
     logger.info(f"prompt: {prompt}")
 
     steps = await run_plan_phase(prompt, tools, tool_map, model, logger)
-    await run_exec_loop(prompt, steps, tools, tool_map, model, logger)
+    return await run_exec_loop(prompt, steps, tools, tool_map, model, logger)

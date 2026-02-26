@@ -10,8 +10,10 @@ RUN pip install --no-cache-dir \
     mcp \
     langchain-mcp-adapters \
     pytest \
-    pytest-asyncio
+    pytest-asyncio \
+    fastapi \
+    "uvicorn[standard]"
 
 COPY app/ .
 
-CMD ["tail", "-f", "/dev/null"]
+CMD ["uvicorn", "web_server:app", "--host", "0.0.0.0", "--port", "8000"]

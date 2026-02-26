@@ -34,7 +34,7 @@ def _update_step(steps: list[Step], idx: int, is_error: bool, result_str: str) -
 
 async def run_exec_loop(
     prompt: str, steps: list[Step], tools: list, tool_map: dict, model, logger
-) -> None:
+) -> str | None:
     llm_with_tools = model.bind_tools(tools)
     execution_history: list[str] = []
     consecutive_failures = 0
@@ -64,8 +64,7 @@ async def run_exec_loop(
 
             answer = _sanitize(response.content)
             logger.info(f"final answer:\n{answer}")
-            print(answer)
-            return
+            return answer
 
         tc = response.tool_calls[0]
         logger.info(f"[Tool Call] {tc['name']}({tc['args']})")
