@@ -6,10 +6,10 @@ MODELS=(
     "qwen2.5:14b"         # 14B：汎用
     "llama3.2:3b"         # 3B：軽量
     "lfm2.5-thinking"     # 1.2B：超軽量・推論特化
-    "gemma3:4b"           # 4B：ノートPC向け汎用
-    "phi4"                # 14B：STEM・論理推論
+    # "gemma3:4b"         # 4B：Ollama ツール呼び出し非対応
+    # "phi4"              # 14B：Ollama ツール呼び出し非対応
     "qwen3:30b-a3b"       # 30B(MoE)：高効率フラグシップ
-    "deepseek-r1:14b"     # 14B：蒸留版・推論特化
+    # "deepseek-r1:14b"   # 14B：Ollama ツール呼び出し非対応
 )
 TASKS=(
     # [CHAT]  Router → Chat path: ツール不使用で即答できるか
@@ -56,6 +56,17 @@ for MODEL in "${MODELS[@]}"; do
         START=$(date +%s)
         OUTPUT=$(docker exec -e OLLAMA_MODEL="$MODEL" langchain_app python main.py "$TASK" 2>"$LOG_FILE" || echo "[ERROR]")
         ELAPSED=$(( $(date +%s) - START ))
+
+        # pydantic/mcp の非決定的 import エラー時にリトライ
+        if [ "$OUTPUT" = "[ERROR]" ] && grep -q "KeyError" "$LOG_FILE" 2>/dev/null; then
+            echo "  [retry] pydantic import エラー検出、リトライ..."
+            RETRY_LOG="$LOG_FILE.retry"
+            START=$(date +%s)
+            OUTPUT=$(docker exec -e OLLAMA_MODEL="$MODEL" langchain_app python main.py "$TASK" 2>"$RETRY_LOG" || echo "[ERROR]")
+            ELAPSED=$(( $(date +%s) - START ))
+            mv "$RETRY_LOG" "$LOG_FILE"
+        fi
+
         TASK_IDX=$(( TASK_IDX + 1 ))
 
         echo "  結果: $OUTPUT"
@@ -63,6 +74,10 @@ for MODEL in "${MODELS[@]}"; do
         echo "- 結果: $OUTPUT" >> "$RESULTS_FILE"
         echo "- 所要時間: ${ELAPSED}秒" >> "$RESULTS_FILE"
     done
+
+    # モデルテスト後に /data を初期化（次モデルのテスト条件を揃える）
+    echo "  [cleanup] /data を初期化..."
+    docker exec langchain_app sh -c 'rm -rf /data/* 2>/dev/null || true'
 done
 
 echo ""

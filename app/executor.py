@@ -21,14 +21,12 @@ from utils import _sanitize, setup_logging
 
 
 # Patterns that are unambiguously conversational — no LLM call needed.
-# Covers common Japanese greetings and their English equivalents.
 _CHAT_RE = re.compile(
     r'^(こんにちは|おはよう|こんばんは|ありがとう|どうも|よろしく|'
     r'お疲れ|ただいま|いただきます|ごちそうさま|はじめまして|'
     r'hello|hi\b|hey\b|thanks|thank you|good (morning|evening|night))',
     re.IGNORECASE,
 )
-
 
 def _quick_classify(prompt: str) -> str | None:
     """Keyword pre-filter: returns 'chat' for obvious greetings, else None."""

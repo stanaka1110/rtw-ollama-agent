@@ -184,6 +184,10 @@ async def _invoke_tool(tc: dict, tool_map: dict) -> tuple[str, bool]:
     except ToolException as e:
         result_str = f"Tool error: {e}"
         is_error = True
+    except Exception as e:
+        # Catches McpError (Connection closed), asyncio.CancelledError leakage, etc.
+        result_str = f"Tool error: {type(e).__name__}: {e}"
+        is_error = True
     return result_str, is_error
 
 
@@ -255,6 +259,10 @@ async def run_exec_loop(
             logger.warning(f"[exec:llm] LLM呼び出しがタイムアウト ({elapsed:.0f}s)。")
             metrics.write_summary(steps)
             return None
+        except Exception as e:
+            logger.error(f"[exec:llm] LLM呼び出しエラー: {type(e).__name__}: {e}")
+            metrics.write_summary(steps)
+            return f"[エラー] このモデルはツール呼び出しに非対応か、LLM呼び出しに失敗しました: {e}"
         logger.info(f"[exec:llm] done in {time.perf_counter() - t0:.1f}s")
 
         if not response.tool_calls:
