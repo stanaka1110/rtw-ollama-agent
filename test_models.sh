@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MODELS=("qwen2.5:7b" "qwen2.5:14b" "llama3.2:3b")
+MODELS=(
+    "qwen2.5:7b"          # 7B：ベースライン
+    "qwen2.5:14b"         # 14B：汎用
+    "llama3.2:3b"         # 3B：軽量
+    "lfm2.5-thinking"     # 1.2B：超軽量・推論特化
+    "gemma3:4b"           # 4B：ノートPC向け汎用
+    "phi4"                # 14B：STEM・論理推論
+    "qwen3:30b-a3b"       # 30B(MoE)：高効率フラグシップ
+    "deepseek-r1:14b"     # 14B：蒸留版・推論特化
+)
 TASKS=(
     # [CHAT]  Router → Chat path: ツール不使用で即答できるか
     "こんにちは"

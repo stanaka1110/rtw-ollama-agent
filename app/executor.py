@@ -49,9 +49,12 @@ async def classify_intent(prompt: str, model, logger) -> str:
         SystemMessage(content=ROUTER_PROMPT),
         HumanMessage(content=prompt),
     ])
-    raw = response.content.strip().upper()
-    intent = "chat" if raw.startswith("CHAT") else "agent"
-    logger.info(f"[router] raw={raw!r} → intent={intent} ({time.perf_counter() - t0:.1f}s)")
+    # Strip <think>...</think> blocks emitted by reasoning models (deepseek-r1, etc.)
+    # before checking for CHAT/AGENT, then search anywhere in the response.
+    raw = re.sub(r"<think>.*?</think>", "", response.content, flags=re.DOTALL).strip().upper()
+    m = re.search(r"\b(CHAT|AGENT)\b", raw)
+    intent = "chat" if (m and m.group(1) == "CHAT") else "agent"
+    logger.info(f"[router] raw={raw[:120]!r} → intent={intent} ({time.perf_counter() - t0:.1f}s)")
     return intent
 
 
