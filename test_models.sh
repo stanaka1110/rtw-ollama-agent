@@ -35,15 +35,19 @@ for MODEL in "${MODELS[@]}"; do
     echo "  [warmup] $MODEL ..."
     docker exec ollama ollama run "$MODEL" "hi" > /dev/null 2>&1 || true
 
+    TASK_IDX=0
     for TASK in "${TASKS[@]}"; do
         echo ""
         echo "  --- タスク: $TASK ---"
         echo "" >> "$RESULTS_FILE"
         echo "### タスク: $TASK" >> "$RESULTS_FILE"
 
+        LOG_FILE="$RUN_DIR/${MODEL//[:.]/_}_task${TASK_IDX}.stderr.log"
+
         START=$(date +%s)
-        OUTPUT=$(docker exec -e OLLAMA_MODEL="$MODEL" langchain_app python main.py "$TASK" 2>/dev/null || echo "[ERROR]")
+        OUTPUT=$(docker exec -e OLLAMA_MODEL="$MODEL" langchain_app python main.py "$TASK" 2>"$LOG_FILE" || echo "[ERROR]")
         ELAPSED=$(( $(date +%s) - START ))
+        TASK_IDX=$(( TASK_IDX + 1 ))
 
         echo "  結果: $OUTPUT"
         echo "  所要時間: ${ELAPSED}秒"
@@ -111,3 +115,4 @@ echo ""
 echo "保存先フォルダ: $RUN_DIR"
 echo "  - model_test_results.txt  ... テキスト結果"
 echo "  - metrics_snapshot.jsonl  ... 今回分の生メトリクス"
+echo "  - *_task*.stderr.log      ... モデル/タスクごとのstderrログ"

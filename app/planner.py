@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import re
 import time
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -9,29 +11,42 @@ from utils import _tool_descriptions
 
 logger = logging.getLogger("agent")
 
+# Prompts containing these keywords likely need filesystem/DB state.
+_STATE_NEEDED_RE = re.compile(
+    r'(ファイル|file|/data|データベース|database|db|テーブル|table|'
+    r'メモ|memo|記憶|memory|履歴|history|保存|save|作成|creat|書)',
+    re.IGNORECASE,
+)
 
-async def gather_current_state(tool_map: dict) -> str:
-    parts = []
-    t0 = time.perf_counter()
-    logger.info("[gather_state] start")
-    for tool_name, label, args in [
-        ("list_tables",    "SQLite tables",     {}),
-        ("list_directory", "Files in /data",    {"path": "/data"}),
-        ("list_memories",  "Stored memories",   {}),
-    ]:
+
+async def gather_current_state(tool_map: dict, prompt: str = "") -> str:
+    if prompt and not _STATE_NEEDED_RE.search(prompt):
+        logger.info("[gather_state] skipped (no filesystem/DB keywords in prompt)")
+        return "(state gathering skipped)"
+
+    async def _fetch(tool_name: str, label: str, args: dict) -> str | None:
         if tool_name not in tool_map:
-            continue
+            return None
         try:
             result = await tool_map[tool_name].ainvoke(args)
-            parts.append(f"[{label}]\n{result}")
+            return f"[{label}]\n{result}"
         except Exception as e:
-            parts.append(f"[{label}]\n(error: {e})")
+            return f"[{label}]\n(error: {e})"
+
+    t0 = time.perf_counter()
+    logger.info("[gather_state] start (parallel)")
+    results = await asyncio.gather(
+        _fetch("list_tables",    "SQLite tables",  {}),
+        _fetch("list_directory", "Files in /data", {"path": "/data"}),
+        _fetch("list_memories",  "Stored memories", {}),
+    )
+    parts = [r for r in results if r is not None]
     logger.info(f"[gather_state] done in {time.perf_counter() - t0:.1f}s")
     return "\n\n".join(parts) if parts else "(no state available)"
 
 
 async def make_plan(prompt: str, tools: list, tool_map: dict, model) -> str:
-    current_state = await gather_current_state(tool_map)
+    current_state = await gather_current_state(tool_map, prompt)
     messages = [
         SystemMessage(content=PLAN_PROMPT.format(
             current_state=current_state,

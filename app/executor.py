@@ -1,3 +1,4 @@
+import re
 import time
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -17,6 +18,23 @@ from servers import (
     WEBSEARCH_CONFIG,
 )
 from utils import _sanitize, setup_logging
+
+
+# Patterns that are unambiguously conversational — no LLM call needed.
+# Covers common Japanese greetings and their English equivalents.
+_CHAT_RE = re.compile(
+    r'^(こんにちは|おはよう|こんばんは|ありがとう|どうも|よろしく|'
+    r'お疲れ|ただいま|いただきます|ごちそうさま|はじめまして|'
+    r'hello|hi\b|hey\b|thanks|thank you|good (morning|evening|night))',
+    re.IGNORECASE,
+)
+
+
+def _quick_classify(prompt: str) -> str | None:
+    """Keyword pre-filter: returns 'chat' for obvious greetings, else None."""
+    if _CHAT_RE.match(prompt.strip()):
+        return "chat"
+    return None
 
 
 async def classify_intent(prompt: str, model, logger) -> str:
@@ -43,8 +61,12 @@ async def run(prompt: str) -> str | None:
 
     logger.info(f"prompt: {prompt}")
 
-    # --- Router: classify BEFORE expensive MCP setup ---
-    intent = await classify_intent(prompt, model, logger)
+    # --- Router: keyword pre-filter, then LLM fallback ---
+    intent = _quick_classify(prompt)
+    if intent:
+        logger.info(f"[router] quick_classify → {intent}")
+    else:
+        intent = await classify_intent(prompt, model, logger)
 
     if intent == "chat":
         response = await model.ainvoke([
