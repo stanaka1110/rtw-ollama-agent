@@ -5,7 +5,7 @@ from collections import defaultdict
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import ToolException
 
-from config import MAX_FAILURES_BEFORE_REPLAN, MAX_REPLANS, MAX_STEPS
+from config import EXEC_TIMEOUT, MAX_FAILURES_BEFORE_REPLAN, MAX_REPLANS, MAX_STEPS
 from prompts import SYSTEM_PROMPT
 from models import Step, format_checklist
 from planner import _apply_replan
@@ -213,7 +213,15 @@ async def run_exec_loop(
         HumanMessage(content=_task_message(prompt, steps)),
     ]
 
+    loop_start = time.perf_counter()
+
     for turn in range(MAX_STEPS):
+        elapsed = time.perf_counter() - loop_start
+        if elapsed > EXEC_TIMEOUT:
+            logger.warning(f"タイムアウト ({elapsed:.0f}s > {EXEC_TIMEOUT}s)。")
+            metrics.write_summary(steps)
+            return None
+
         logger.info(f"[exec:llm] start (turn {turn + 1}, step {current_step_idx + 1}/{len(steps)})")
         t0 = time.perf_counter()
         response = await llm_with_tools.ainvoke(messages)
