@@ -1,3 +1,4 @@
+import asyncio
 import difflib
 import time
 from collections import defaultdict
@@ -147,6 +148,23 @@ def _fix_args(tc: dict, tool_map: dict) -> tuple[dict, list[str]]:
     return {**tc, "args": new_args}, fixes
 
 
+def _fix_content(tc: dict) -> tuple[dict, str | None]:
+    """In write_file calls, convert literal \\n / \\t escape sequences to actual
+    characters.  Small models often emit JSON with double-escaped newlines
+    (e.g. "content": "line1\\nline2") which produce a SyntaxError when the
+    string is written verbatim to a Python file.
+    """
+    if tc["name"] != "write_file":
+        return tc, None
+    content = tc["args"].get("content", "")
+    if "\\" not in content:
+        return tc, None
+    fixed = content.replace("\\n", "\n").replace("\\t", "\t")
+    if fixed == content:
+        return tc, None
+    return {**tc, "args": {**tc["args"], "content": fixed}}, "\\n/\\t → actual chars in content"
+
+
 async def _invoke_tool(tc: dict, tool_map: dict) -> tuple[str, bool]:
     """ツールを呼び出し (result_str, is_error) を返す。
 
@@ -215,6 +233,10 @@ async def run_exec_loop(
 
     loop_start = time.perf_counter()
 
+    def _remaining() -> float:
+        """Remaining seconds before EXEC_TIMEOUT (minimum 5s to avoid instant kill)."""
+        return max(5.0, EXEC_TIMEOUT - (time.perf_counter() - loop_start))
+
     for turn in range(MAX_STEPS):
         elapsed = time.perf_counter() - loop_start
         if elapsed > EXEC_TIMEOUT:
@@ -224,7 +246,15 @@ async def run_exec_loop(
 
         logger.info(f"[exec:llm] start (turn {turn + 1}, step {current_step_idx + 1}/{len(steps)})")
         t0 = time.perf_counter()
-        response = await llm_with_tools.ainvoke(messages)
+        try:
+            response = await asyncio.wait_for(
+                llm_with_tools.ainvoke(messages), timeout=_remaining()
+            )
+        except asyncio.TimeoutError:
+            elapsed = time.perf_counter() - loop_start
+            logger.warning(f"[exec:llm] LLM呼び出しがタイムアウト ({elapsed:.0f}s)。")
+            metrics.write_summary(steps)
+            return None
         logger.info(f"[exec:llm] done in {time.perf_counter() - t0:.1f}s")
 
         if not response.tool_calls:
@@ -236,10 +266,19 @@ async def run_exec_loop(
                 logger.info(f"[replan triggered] {reason} (replan {replan_count}/{MAX_REPLANS})")
 
                 watchdog_hint = _build_watchdog_hint(tool_failure_counts)
-                steps, current_step_idx = await _apply_replan(
-                    prompt, steps, execution_history, tools, model, logger,
-                    watchdog_hint=watchdog_hint,
-                )
+                try:
+                    steps, current_step_idx = await asyncio.wait_for(
+                        _apply_replan(
+                            prompt, steps, execution_history, tools, model, logger,
+                            watchdog_hint=watchdog_hint,
+                        ),
+                        timeout=_remaining(),
+                    )
+                except asyncio.TimeoutError:
+                    elapsed = time.perf_counter() - loop_start
+                    logger.warning(f"[replan] LLM呼び出しがタイムアウト ({elapsed:.0f}s)。")
+                    metrics.write_summary(steps)
+                    return None
                 consecutive_failures = 0
                 messages.append(HumanMessage(content=_task_message(prompt, steps)))
                 continue
@@ -260,6 +299,11 @@ async def run_exec_loop(
         tc, arg_fixes = _fix_args(tc, tool_map)
         if arg_fixes:
             logger.warning(f"[arg_fix] {tc['name']}: {', '.join(arg_fixes)}")
+
+        # --- Content Fixer: unescape literal \\n in write_file content ---
+        tc, content_fix = _fix_content(tc)
+        if content_fix:
+            logger.warning(f"[content_fix] {tc['name']}: {content_fix}")
 
         logger.info(f"[Tool Call] {tc['name']}({tc['args']})")
         messages.append(AIMessage(content=response.content, tool_calls=[tc]))
@@ -296,10 +340,19 @@ async def run_exec_loop(
                 if watchdog_hint:
                     logger.warning(f"[watchdog] {watchdog_hint}")
 
-                steps, current_step_idx = await _apply_replan(
-                    prompt, steps, execution_history, tools, model, logger,
-                    watchdog_hint=watchdog_hint,
-                )
+                try:
+                    steps, current_step_idx = await asyncio.wait_for(
+                        _apply_replan(
+                            prompt, steps, execution_history, tools, model, logger,
+                            watchdog_hint=watchdog_hint,
+                        ),
+                        timeout=_remaining(),
+                    )
+                except asyncio.TimeoutError:
+                    elapsed = time.perf_counter() - loop_start
+                    logger.warning(f"[replan] LLM呼び出しがタイムアウト ({elapsed:.0f}s)。")
+                    metrics.write_summary(steps)
+                    return None
                 consecutive_failures = 0
                 messages.append(HumanMessage(content=_task_message(prompt, steps)))
         else:

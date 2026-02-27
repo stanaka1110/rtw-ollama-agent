@@ -112,7 +112,11 @@ def setup_logging() -> logging.Logger:
     log_file = LOG_DIR / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     logger = logging.getLogger("agent")
     logger.setLevel(logging.DEBUG)
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
     fh = logging.FileHandler(log_file, encoding="utf-8")
-    fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    fh.setFormatter(formatter)
     logger.addHandler(fh)
+    sh = logging.StreamHandler()  # also write to stderr → captured by docker exec 2>
+    sh.setFormatter(formatter)
+    logger.addHandler(sh)
     return logger
