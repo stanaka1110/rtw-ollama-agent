@@ -1,7 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Usage: ./compare_7b_14b.sh [--prompt <variant>] [--models <7b,14b>]
+#
+# PROMPT_VARIANT can also be set via env:
+#   PROMPT_VARIANT=v1 ./compare_7b_14b.sh
+#
+PROMPT_VARIANT="${PROMPT_VARIANT:-default}"
 MODELS=("qwen2.5:7b" "qwen2.5:14b")
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --prompt)  PROMPT_VARIANT="$2"; shift 2 ;;
+        --models)  IFS=',' read -r -a MODELS <<< "$2"; shift 2 ;;
+        *) echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+done
 
 TASKS=(
     "salesテーブルに商品名・数量・単価のデータを10件INSERTして、Pythonでsqlite3モジュールを使ってDBに接続し、合計売上・最高売上・最低売上・平均売上を計算して整形したレポートを/data/sales_report.txtに保存して"
@@ -13,7 +27,7 @@ RUN_DIR="test_results/compare_$(date '+%Y%m%d_%H%M%S')"
 mkdir -p "$RUN_DIR"
 RESULTS_FILE="$RUN_DIR/results.txt"
 
-echo "# 7b vs 14b 難易度比較 $(date '+%Y-%m-%d %H:%M')" | tee "$RESULTS_FILE"
+echo "# 7b vs 14b 難易度比較 $(date '+%Y-%m-%d %H:%M')  [prompt=$PROMPT_VARIANT]" | tee "$RESULTS_FILE"
 echo "" | tee -a "$RESULTS_FILE"
 
 METRICS_LINES_BEFORE=$(docker exec langchain_app sh -c \
@@ -36,7 +50,7 @@ for MODEL in "${MODELS[@]}"; do
         LOG_FILE="$RUN_DIR/${MODEL//[:.]/_}_task${TASK_IDX}.log"
 
         START=$(date +%s)
-        OUTPUT=$(docker exec -e OLLAMA_MODEL="$MODEL" langchain_app python main.py "$TASK" 2>"$LOG_FILE" || echo "[ERROR]")
+        OUTPUT=$(docker exec -e OLLAMA_MODEL="$MODEL" -e PROMPT_VARIANT="$PROMPT_VARIANT" langchain_app python main.py "$TASK" 2>"$LOG_FILE" || echo "[ERROR]")
         ELAPSED=$(( $(date +%s) - START ))
 
         echo "  結果: $OUTPUT" | tee -a "$RESULTS_FILE"

@@ -1,4 +1,12 @@
+import os
 from pathlib import Path
+
+# Prompt variant to use (overridable via PROMPT_VARIANT env var).
+# Variants are defined in core/prompts.py.
+#   "default" — current baseline behaviour
+#   "v1"      — adds explicit "output ONLY <tool_call>" rule, no examples
+#   "v2"      — v1 + keep examples for argument-name guidance
+PROMPT_VARIANT: str = os.environ.get("PROMPT_VARIANT", "default")
 
 MAX_STEPS = 30
 MAX_FAILURES_BEFORE_REPLAN = 1
