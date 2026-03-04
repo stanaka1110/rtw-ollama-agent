@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from models import Step, format_checklist, parse_steps
+from core.models import Step, format_checklist, parse_steps
 
 
 def test_parse_steps_basic():

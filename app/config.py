@@ -1,47 +1,133 @@
+import os
 from pathlib import Path
+
+# Prompt variant to use (overridable via PROMPT_VARIANT env var).
+# Variants are defined in core/prompts.py.
+#   "default" — current baseline behaviour
+#   "v1"      — adds explicit "output ONLY <tool_call>" rule, no examples
+#   "v2"      — v1 + keep examples for argument-name guidance
+PROMPT_VARIANT: str = os.environ.get("PROMPT_VARIANT", "default")
 
 MAX_STEPS = 30
 MAX_FAILURES_BEFORE_REPLAN = 1
 MAX_REPLANS = 3
+EXEC_TIMEOUT = 1200  # seconds; exec loop is aborted when this is exceeded
 LOG_DIR = Path("/app/logs")
 
-PLAN_PROMPT = """\
-You are a task planner. Given a user request, the current system state, \
-and available tools, output a concrete numbered execution plan.
-For each step, write: <number>. <tool_name>: <what to do>
-Be specific about arguments. Do NOT execute — only plan.
-Use the current state information to make informed decisions \
-(e.g. don't create a table that already exists).
-Output the plan in Japanese.
+# ---------------------------------------------------------------------------
+# Feature flags
+# ---------------------------------------------------------------------------
+# Toggle experimental or optional behaviours without touching logic code.
+# Each flag is a bool; set to False to disable a feature entirely.
+#
+FEATURES: dict[str, bool] = {
+    # Trim long ToolMessage content before adding to the LLM context.
+    # Prevents context overflow when fetch_page / read_file return large text.
+    "tool_result_trimming": True,
 
-Current system state:
-{current_state}
+    # Correct hallucinated tool names via alias table + fuzzy match.
+    "tool_name_fixer": True,
 
-Available tools:
-{tool_descriptions}"""
+    # Normalise hallucinated argument names to match the tool schema.
+    "arg_fixer": True,
 
-REPLAN_PROMPT = """\
-You are a task planner. The execution encountered failures.
-Review the checklist below and create a REVISED plan for the REMAINING steps only.
-Do NOT re-include already completed (✅) steps.
-Fix the approach for failed (❌) steps based on the error details.
-Output the revised plan in Japanese.
+    # Unescape literal \\n / \\t in write_file content strings.
+    "content_fixer": True,
 
-Available tools:
-{tool_descriptions}"""
+    # Watchdog: warn when the same tool fails repeatedly.
+    "watchdog": True,
 
-SYSTEM_PROMPT = """\
-You are a helpful AI assistant with the following tools:
-- filesystem (read_file, write_file, etc.): paths must start with /data/
-- shell (execute_command): use cwd=/workspace or cwd=/data, shell=bash.
-  To run a Python file, use: python3 /data/<filename> (never ./filename)
-- websearch (web_search, fetch_page): search the internet.
-  After web_search, call fetch_page on the best URL to get actual content.
-- time (get_current_datetime): get the current date/time in JST.
-- sqlite (list_tables, query): SQLite DB at /data/agent.db for structured data.
-- memory (remember, recall, list_memories, forget): persist key-value notes.
-Rules:
-1. Always use tools — never just describe what you would do.
-2. Call ONE tool at a time and wait for the result before calling the next.
-3. Follow the execution plan step by step until all steps are complete.
-4. You MUST respond ONLY in Japanese. Never use Chinese in your response."""
+    # Skip gather_current_state for prompts that don't need filesystem info.
+    "state_skip_optimization": True,
+
+    # Limit token generation per LLM call by phase (see NUM_PREDICT_PER_PHASE).
+    # Prevents runaway generation (e.g. 3000-token stuck turns on 14b).
+    "num_predict_limit": False,
+
+    # Sliding window: keep only the most recent N messages in the exec loop
+    # context, preserving the fixed System + Task head.
+    # Reduces prefill time as conversation grows (prefill is the main bottleneck
+    # on CPU: 29 tok/s → 3000 token context costs ~103s just for prefill).
+    "message_window": True,
+}
+
+# ---------------------------------------------------------------------------
+# Per-phase num_predict (used when FEATURES["num_predict_limit"] is True)
+# ---------------------------------------------------------------------------
+# num_predict caps how many tokens the LLM generates in a single call.
+# Setting this too low risks truncating the response before a tool call is
+# emitted; too high wastes time on runaway generation.
+#
+# Phase descriptions:
+#   router  — single word output (CHAT / AGENT); very short
+#   chat    — conversational reply; moderate length
+#   plan    — numbered step list; can be long for complex tasks
+#   exec    — tool call JSON + brief reasoning; compact
+#   replan  — revised numbered list; similar to plan
+#
+# Tuning guide (CPU: ~6 tok/s for 14b, ~11 tok/s for 7b):
+#   128 tokens → ~21s (14b) /  12s (7b)
+#   256 tokens → ~43s (14b) /  23s (7b)
+#   512 tokens → ~85s (14b) /  47s (7b)
+#  1024 tokens → ~171s (14b) / 94s (7b)
+#
+# ---------------------------------------------------------------------------
+# Sliding window (used when FEATURES["message_window"] is True)
+# ---------------------------------------------------------------------------
+# Number of messages kept from the *tail* of the conversation history.
+# The first MESSAGE_WINDOW_HEAD messages (System + Task) are always preserved.
+#
+# Each exec turn adds 2 messages (AIMessage + ToolMessage), so:
+#   window=8  → keeps 4 recent tool-call turns  ≈ 1200-1600 tokens
+#   window=6  → keeps 3 recent tool-call turns  ≈  900-1200 tokens
+#   window=4  → keeps 2 recent tool-call turns  ≈  600- 800 tokens
+#
+# Tuning guide (prefill: 29 tok/s on Ryzen 9 6900HX CPU):
+#   window=8  → ~1400 tok → prefill ~48s  (vs ~103s at full context)
+#   window=6  → ~1050 tok → prefill ~36s
+#   window=4  → ~  700 tok → prefill ~24s  (risk: forgets earlier errors)
+#
+MESSAGE_WINDOW_HEAD: int = 2    # System + Task; never dropped
+MESSAGE_WINDOW_SIZE: int = 12   # tail messages to keep (must be even: AI+Tool pairs)
+
+NUM_PREDICT_PER_PHASE: dict[str, int] = {
+    "router": 32,
+    "chat":   512,
+    "plan":   1024,
+    "exec":   768,   # 512 は TCA 低下あり。768 が次の試験候補
+    "replan": 1024,
+}
+
+# ---------------------------------------------------------------------------
+# Tool result trimming (used when FEATURES["tool_result_trimming"] is True)
+# ---------------------------------------------------------------------------
+# Characters to keep in a ToolMessage before adding to the LLM context.
+#
+# Rules (applied in order):
+#   1. Per-tool limit in TOOL_RESULT_MAX_CHARS  (highest priority)
+#   2. TOOL_RESULT_DEFAULT_MAX_CHARS            (fallback for unlisted tools)
+#   3. 0 or None means "no limit"
+#
+# Tuning guide (1 token ≈ 3-4 chars for mixed JP/EN text):
+#   2000 chars ≈  500 tokens  — generous, safe for 4096 ctx
+#   1000 chars ≈  250 tokens  — tight but sufficient for most tool outputs
+#    500 chars ≈  125 tokens  — very tight; may lose important details
+#
+TOOL_RESULT_DEFAULT_MAX_CHARS: int = 2000
+
+TOOL_RESULT_MAX_CHARS: dict[str, int] = {
+    # Web content tends to be very long; limit aggressively.
+    "fetch_page":        1500,
+    "web_search":        1000,
+    # File / command output can also be large.
+    "read_file":         2000,
+    "execute_command":   1500,
+    # SQLite results are usually compact; keep more.
+    "query":             2000,
+    # Small tools — default is fine, but list explicitly for clarity.
+    "list_directory":    1000,
+    "write_file":         500,
+    "create_directory":   500,
+    "remember":           500,
+    "recall":            1000,
+}

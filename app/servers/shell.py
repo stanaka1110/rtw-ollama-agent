@@ -1,5 +1,3 @@
-"""MCP Shell サーバ設定・ユーティリティ"""
-
 SERVER_CONFIG = {
     "command": "bash",
     "args": [

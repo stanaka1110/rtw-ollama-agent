@@ -6,8 +6,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from models import Step
-from planner import _apply_replan, gather_current_state
+from core.models import Step
+from agent.planner import _apply_replan, gather_current_state
 
 
 def _make_tool(return_value=None, side_effect=None):

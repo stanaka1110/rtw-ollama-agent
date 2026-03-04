@@ -7,8 +7,8 @@ from langchain_core.tools import ToolException
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from exec_loop import _invoke_tool, _update_step
-from models import Step
+from agent.loop_helpers import _invoke_tool, _update_step
+from core.models import Step
 
 
 def _make_tool(return_value=None, side_effect=None):
