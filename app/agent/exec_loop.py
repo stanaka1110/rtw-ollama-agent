@@ -74,7 +74,7 @@ async def run_exec_loop(
         elapsed = time.perf_counter() - loop_start
         if elapsed > EXEC_TIMEOUT:
             logger.warning(f"タイムアウト ({elapsed:.0f}s > {EXEC_TIMEOUT}s)。")
-            metrics.write_summary(steps)
+            metrics.write_summary(steps, termination="timeout")
             return None
 
         ctx_messages = messages
@@ -95,11 +95,11 @@ async def run_exec_loop(
         except asyncio.TimeoutError:
             elapsed = time.perf_counter() - loop_start
             logger.warning(f"[exec:llm] LLM呼び出しがタイムアウト ({elapsed:.0f}s)。")
-            metrics.write_summary(steps)
+            metrics.write_summary(steps, termination="timeout")
             return None
         except Exception as e:
             logger.error(f"[exec:llm] LLM呼び出しエラー: {type(e).__name__}: {e}")
-            metrics.write_summary(steps)
+            metrics.write_summary(steps, termination="llm_error")
             return f"[エラー] このモデルはツール呼び出しに非対応か、LLM呼び出しに失敗しました: {e}"
         logger.info(f"[exec:llm] done in {time.perf_counter() - t0:.1f}s")
 
@@ -108,6 +108,7 @@ async def run_exec_loop(
             pending_steps = [s for s in steps if s.status == "pending"]
             if (pending_steps or consecutive_failures > 0) and replan_count < MAX_REPLANS:
                 replan_count += 1
+                metrics.log_replan()
                 reason = "pending steps remain" if pending_steps else "gave up after error"
                 logger.info(f"[replan triggered] {reason} (replan {replan_count}/{MAX_REPLANS})")
                 result = await _do_replan(
@@ -116,7 +117,7 @@ async def run_exec_loop(
                 )
                 if result is None:
                     logger.warning(f"[replan] LLM呼び出しがタイムアウト ({time.perf_counter() - loop_start:.0f}s)。")
-                    metrics.write_summary(steps)
+                    metrics.write_summary(steps, termination="timeout")
                     return None
                 steps, current_step_idx = result
                 consecutive_failures = 0
@@ -125,7 +126,7 @@ async def run_exec_loop(
 
             answer = _sanitize(response.content)
             logger.info(f"final answer:\n{answer}")
-            metrics.write_summary(steps)
+            metrics.write_summary(steps, termination="answer")
             return answer
 
         tc = response.tool_calls[0]
@@ -188,6 +189,7 @@ async def run_exec_loop(
 
             if consecutive_failures >= MAX_FAILURES_BEFORE_REPLAN and replan_count < MAX_REPLANS:
                 replan_count += 1
+                metrics.log_replan()
                 logger.info(
                     f"[replan triggered] {consecutive_failures} consecutive failures"
                     f" (replan {replan_count}/{MAX_REPLANS})"
@@ -198,7 +200,7 @@ async def run_exec_loop(
                 )
                 if result is None:
                     logger.warning(f"[replan] LLM呼び出しがタイムアウト ({time.perf_counter() - loop_start:.0f}s)。")
-                    metrics.write_summary(steps)
+                    metrics.write_summary(steps, termination="timeout")
                     return None
                 steps, current_step_idx = result
                 consecutive_failures = 0
@@ -207,4 +209,4 @@ async def run_exec_loop(
             consecutive_failures = 0
 
     logger.warning("最大ステップ数に達しました。")
-    metrics.write_summary(steps)
+    metrics.write_summary(steps, termination="max_steps")

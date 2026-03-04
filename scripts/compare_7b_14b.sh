@@ -97,6 +97,9 @@ for MODEL in "${MODELS[@]}"; do
         OUTPUT=$(docker exec \
             -e OLLAMA_MODEL="$MODEL" \
             -e PROMPT_VARIANT="$PROMPT_VARIANT" \
+            -e TASK_TIER="$TIER" \
+            -e TASK_ID="$((TASK_IDX+1))" \
+            -e LOG_LEVEL=DEBUG \
             langchain_app python main.py "$TASK" 2>"$LOG_FILE" || echo "[ERROR]")
         ELAPSED=$(( $(date +%s) - START ))
 
@@ -136,15 +139,17 @@ with open(sys.argv[1], encoding="utf-8") as f:
                 pass
 
 stats = collections.defaultdict(lambda: {
-    "tca": [], "name_acc": [], "arg_fit": [], "step_cr": [],
-    "turns": [], "elapsed": [], "count": 0
+    "tca": [], "name_acc": [], "arg_fit": [], "err_rate": [],
+    "step_cr": [], "replans": [], "turns": [], "elapsed": [], "count": 0
 })
 for r in records:
     m = r.get("model", "unknown")
     stats[m]["tca"].append(r.get("tca", 0))
     stats[m]["name_acc"].append(r.get("tool_name_accuracy", 1))
     stats[m]["arg_fit"].append(r.get("arg_fit_rate", 1))
+    stats[m]["err_rate"].append(r.get("error_rate", 0))
     stats[m]["step_cr"].append(r.get("step_completion_rate", 0))
+    stats[m]["replans"].append(r.get("replan_count", 0))
     stats[m]["turns"].append(r.get("total_turns", 0))
     stats[m]["elapsed"].append(r.get("elapsed_sec", 0))
     stats[m]["count"] += 1
@@ -152,13 +157,13 @@ for r in records:
 avg = lambda lst: round(sum(lst) / len(lst), 3) if lst else 0.0
 
 print(f"\n{'Model':<20} {'Runs':>4} {'StepCR':>7} {'TCA':>6} "
-      f"{'NameAcc':>8} {'ArgFit':>7} {'AvgTurns':>9} {'AvgSec':>8}")
-print("-" * 75)
+      f"{'ErrRate':>8} {'Replans':>8} {'AvgTurns':>9} {'AvgSec':>8}")
+print("-" * 80)
 for model, d in sorted(stats.items()):
     print(f"{model:<20} {d['count']:>4} {avg(d['step_cr']):>7.3f} {avg(d['tca']):>6.3f} "
-          f"{avg(d['name_acc']):>8.3f} {avg(d['arg_fit']):>7.3f} "
+          f"{avg(d['err_rate']):>8.3f} {avg(d['replans']):>8.1f} "
           f"{avg(d['turns']):>9.1f} {avg(d['elapsed']):>8.0f}")
-print("=" * 75)
+print("=" * 80)
 PYEOF
 )
     echo "$SUMMARY" | tee -a "$RESULTS_FILE"

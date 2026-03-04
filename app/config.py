@@ -8,6 +8,18 @@ from pathlib import Path
 #   "v2"      — v1 + keep examples for argument-name guidance
 PROMPT_VARIANT: str = os.environ.get("PROMPT_VARIANT", "default")
 
+# Logging verbosity (overridable via LOG_LEVEL env var).
+#   WARNING (default) — production mode: console only, no file log, no metrics
+#   INFO              — dev mode: file log + metrics + INFO console
+#   DEBUG             — dev mode: file log + metrics + full DEBUG console
+LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "WARNING")
+
+# Test-context labels written into metrics records (set by compare script).
+#   TASK_TIER — easy / medium / hard / "" (unknown)
+#   TASK_ID   — 1-based index of the task within the current tier run
+TASK_TIER: str = os.environ.get("TASK_TIER", "")
+TASK_ID:   str = os.environ.get("TASK_ID", "")
+
 MAX_STEPS = 30
 MAX_FAILURES_BEFORE_REPLAN = 1
 MAX_REPLANS = 3
