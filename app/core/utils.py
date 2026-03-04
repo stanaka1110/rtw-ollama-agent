@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from config import LOG_DIR
-from models import Step, format_checklist
+from core.models import Step, format_checklist
 
 METRICS_FILE = LOG_DIR / "metrics.jsonl"
 

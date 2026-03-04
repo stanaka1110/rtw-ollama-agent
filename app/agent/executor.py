@@ -4,11 +4,12 @@ import time
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
-import llm
-from prompts import CHAT_PROMPT, ROUTER_PROMPT
-from exec_loop import run_exec_loop
-from models import format_checklist, parse_steps
-from planner import make_plan
+import core.llm as llm
+from agent.exec_loop import run_exec_loop
+from agent.planner import make_plan
+from core.models import format_checklist, parse_steps
+from core.prompts import CHAT_PROMPT, ROUTER_PROMPT
+from core.utils import _sanitize, setup_logging
 from servers import (
     FILESYSTEM_CONFIG,
     MEMORY_CONFIG,
@@ -17,7 +18,6 @@ from servers import (
     TIME_CONFIG,
     WEBSEARCH_CONFIG,
 )
-from utils import _sanitize, setup_logging
 
 
 # Patterns that are unambiguously conversational — no LLM call needed.
@@ -27,6 +27,7 @@ _CHAT_RE = re.compile(
     r'hello|hi\b|hey\b|thanks|thank you|good (morning|evening|night))',
     re.IGNORECASE,
 )
+
 
 def _quick_classify(prompt: str) -> str | None:
     """Keyword pre-filter: returns 'chat' for obvious greetings, else None."""
@@ -58,7 +59,14 @@ async def classify_intent(prompt: str, model, logger) -> str:
 
 async def run(prompt: str) -> str | None:
     logger = setup_logging()
-    model = llm.get_llm()
+
+    # Each phase gets its own LLM instance so num_predict can differ.
+    # When FEATURES["num_predict_limit"] is False all instances are identical.
+    router_model = llm.get_llm("router")
+    chat_model   = llm.get_llm("chat")
+    plan_model   = llm.get_llm("plan")
+    exec_model   = llm.get_llm("exec")
+    replan_model = llm.get_llm("replan")
 
     logger.info(f"prompt: {prompt}")
 
@@ -67,10 +75,10 @@ async def run(prompt: str) -> str | None:
     if intent:
         logger.info(f"[router] quick_classify → {intent}")
     else:
-        intent = await classify_intent(prompt, model, logger)
+        intent = await classify_intent(prompt, router_model, logger)
 
     if intent == "chat":
-        response = await model.ainvoke([
+        response = await chat_model.ainvoke([
             SystemMessage(content=CHAT_PROMPT),
             HumanMessage(content=prompt),
         ])
@@ -78,7 +86,7 @@ async def run(prompt: str) -> str | None:
         logger.info(f"[chat] answer: {answer}")
         return answer
 
-    # --- Agent mode: full Plan-and-Execute (unchanged) ---
+    # --- Agent mode: full Plan-and-Execute ---
     client = MultiServerMCPClient({
         "filesystem": FILESYSTEM_CONFIG,
         "shell":      SHELL_CONFIG,
@@ -90,7 +98,8 @@ async def run(prompt: str) -> str | None:
     tools = await client.get_tools()
     tool_map = {t.name: t for t in tools}
 
-    plan_text = await make_plan(prompt, tools, tool_map, model)
+    plan_text = await make_plan(prompt, tools, tool_map, plan_model)
     steps = parse_steps(plan_text)
     logger.info(f"[plan]\n{format_checklist(steps)}")
-    return await run_exec_loop(prompt, steps, tools, tool_map, model, logger)
+    return await run_exec_loop(prompt, steps, tools, tool_map, exec_model, logger,
+                               replan_model=replan_model)

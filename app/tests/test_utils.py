@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from models import Step
-from utils import _sanitize, _task_message, _tool_descriptions
+from core.models import Step
+from core.utils import _sanitize, _task_message, _tool_descriptions
 
 
 def test_sanitize_removes_tool_call_tags():

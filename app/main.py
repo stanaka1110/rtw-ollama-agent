@@ -1,7 +1,7 @@
 import argparse
 import asyncio
 
-from executor import run
+from agent import run
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MCP オーケストレーター")

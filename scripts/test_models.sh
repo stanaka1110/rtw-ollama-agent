@@ -8,7 +8,7 @@ MODELS=(
     "lfm2.5-thinking"     # 1.2B：超軽量・推論特化
     # "gemma3:4b"         # 4B：Ollama ツール呼び出し非対応
     # "phi4"              # 14B：Ollama ツール呼び出し非対応
-    "qwen3:30b-a3b"       # 30B(MoE)：高効率フラグシップ
+    # "qwen3:30b-a3b"       # 30B(MoE)：RAM 14GB 不足のためスキップ
     # "deepseek-r1:14b"   # 14B：Ollama ツール呼び出し非対応
 )
 TASKS=(

@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from executor import classify_intent
+from agent.executor import classify_intent
 
 logger = logging.getLogger("agent")
 
@@ -85,4 +85,3 @@ async def test_chat_with_trailing_text():
     model = _make_model("CHAT (greeting)")
     intent = await classify_intent("おはよう", model, logger)
     assert intent == "chat"
-

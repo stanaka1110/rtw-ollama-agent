@@ -2,6 +2,8 @@ import os
 
 from langchain_ollama import ChatOllama
 
+from config import FEATURES, NUM_PREDICT_PER_PHASE
+
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
 OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 
@@ -26,11 +28,22 @@ _MODEL_CONFIGS: dict[str, dict] = {
 _DEFAULT_CONFIG: dict = {"temperature": 0.0, "num_ctx": 4096}
 
 
-def get_llm() -> ChatOllama:
+def get_llm(phase: str = "exec") -> ChatOllama:
+    """Return a ChatOllama instance configured for the given execution phase.
+
+    phase values: "router" | "chat" | "plan" | "exec" | "replan"
+
+    When FEATURES["num_predict_limit"] is True, num_predict is set from
+    NUM_PREDICT_PER_PHASE[phase], capping token generation per call and
+    preventing runaway stuck turns (most impactful on 14b w/ CPU inference).
+    """
     cfg = _MODEL_CONFIGS.get(OLLAMA_MODEL, _DEFAULT_CONFIG)
-    return ChatOllama(
-        model=OLLAMA_MODEL,
-        base_url=OLLAMA_BASE_URL,
-        temperature=cfg["temperature"],
-        num_ctx=cfg["num_ctx"],
-    )
+    kwargs: dict = {
+        "model":       OLLAMA_MODEL,
+        "base_url":    OLLAMA_BASE_URL,
+        "temperature": cfg["temperature"],
+        "num_ctx":     cfg["num_ctx"],
+    }
+    if FEATURES.get("num_predict_limit", False):
+        kwargs["num_predict"] = NUM_PREDICT_PER_PHASE.get(phase, 512)
+    return ChatOllama(**kwargs)

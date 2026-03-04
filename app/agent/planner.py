@@ -5,9 +5,10 @@ import time
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from prompts import PLAN_PROMPT, REPLAN_PROMPT
-from models import Step, format_checklist, parse_steps
-from utils import _tool_descriptions
+from config import FEATURES
+from core.models import Step, format_checklist, parse_steps
+from core.prompts import PLAN_PROMPT, REPLAN_PROMPT
+from core.utils import _tool_descriptions
 
 logger = logging.getLogger("agent")
 
@@ -20,7 +21,7 @@ _STATE_NEEDED_RE = re.compile(
 
 
 async def gather_current_state(tool_map: dict, prompt: str = "") -> str:
-    if prompt and not _STATE_NEEDED_RE.search(prompt):
+    if FEATURES.get("state_skip_optimization", True) and prompt and not _STATE_NEEDED_RE.search(prompt):
         logger.info("[gather_state] skipped (no filesystem/DB keywords in prompt)")
         return "(state gathering skipped)"
 
@@ -36,8 +37,8 @@ async def gather_current_state(tool_map: dict, prompt: str = "") -> str:
     t0 = time.perf_counter()
     logger.info("[gather_state] start (parallel)")
     results = await asyncio.gather(
-        _fetch("list_tables",    "SQLite tables",  {}),
-        _fetch("list_directory", "Files in /data", {"path": "/data"}),
+        _fetch("list_tables",    "SQLite tables",   {}),
+        _fetch("list_directory", "Files in /data",  {"path": "/data"}),
         _fetch("list_memories",  "Stored memories", {}),
     )
     parts = [r for r in results if r is not None]
