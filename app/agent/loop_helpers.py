@@ -127,10 +127,12 @@ def _build_watchdog_hint(tool_failure_counts: dict) -> str:
 async def _do_replan(
     prompt, steps, execution_history, tools, replan_model, logger,
     tool_failure_counts, remaining_fn,
+    tool_map: dict | None = None,
 ):
     """リプランを実行し (new_steps, new_step_idx) を返す。タイムアウト時は None を返す。
 
     remaining_fn() — 残り秒数を返す callable (タイムアウト計算用)。
+    tool_map       — plan_tool_name_fixer に使用。
     """
     from agent.planner import _apply_replan  # avoid circular import at module level
 
@@ -145,6 +147,7 @@ async def _do_replan(
             _apply_replan(
                 prompt, steps, execution_history, tools, replan_model, logger,
                 watchdog_hint=watchdog_hint,
+                tool_map=tool_map,
             ),
             timeout=remaining_fn(),
         )

@@ -37,8 +37,12 @@ FEATURES: dict[str, bool] = {
     # Prevents context overflow when fetch_page / read_file return large text.
     "tool_result_trimming": True,
 
-    # Correct hallucinated tool names via alias table + fuzzy match.
+    # Correct hallucinated tool names via alias table + fuzzy match (exec-time).
     "tool_name_fixer": True,
+
+    # Correct hallucinated tool names in plan steps before execution starts.
+    # Uses the same alias + fuzzy logic as tool_name_fixer, applied at plan-time.
+    "plan_tool_name_fixer": True,
 
     # Normalise hallucinated argument names to match the tool schema.
     "arg_fixer": True,

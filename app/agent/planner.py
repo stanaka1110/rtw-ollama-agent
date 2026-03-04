@@ -5,6 +5,7 @@ import time
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from agent.fixers import fix_plan_tool_names
 from config import FEATURES
 from core.models import Step, format_checklist, parse_steps
 from core.prompts import PLAN_PROMPT, REPLAN_PROMPT
@@ -96,12 +97,17 @@ async def replan(
 async def _apply_replan(
     prompt, steps, execution_history, tools, model, logger,
     watchdog_hint: str = "",
+    tool_map: dict | None = None,
 ) -> tuple[list[Step], int]:
     new_plan_text = await replan(
         prompt, steps, execution_history, tools, model,
         watchdog_hint=watchdog_hint,
     )
     new_steps = parse_steps(new_plan_text)
+    if tool_map and FEATURES.get("plan_tool_name_fixer", True):
+        new_steps, plan_fixes = fix_plan_tool_names(new_steps, tool_map)
+        for fix in plan_fixes:
+            logger.warning(f"[plan_fix] {fix}")
     done_steps = [s for s in steps if s.status == "done"]
     merged = done_steps + new_steps
     logger.info(f"[replan]\n{format_checklist(merged)}")

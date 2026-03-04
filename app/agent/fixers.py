@@ -3,9 +3,17 @@
 Corrects hallucinated tool names and argument names emitted by small open-weight
 models before the tool is actually invoked.  All functions are pure / stateless
 and operate only on the tool-call dict and the tool_map.
+
+Shared core
+-----------
+correct_tool_name(name, tool_map)
+    Alias table + difflib fuzzy → used by both exec-time _fix_tool_name
+    and plan-time fix_plan_tool_names.  Add new aliases here once and both
+    paths benefit automatically.
 """
 
 import difflib
+import re
 
 # ---------------------------------------------------------------------------
 # Tool name correction
@@ -14,13 +22,24 @@ import difflib
 # Mapping of commonly hallucinated tool names → correct MCP tool names.
 # Observed across llama3.2:3b, mistral and other small open-weight models.
 _TOOL_NAME_ALIAS: dict[str, str] = {
-    # filesystem
+    # filesystem — read
     "read_text_file":            "read_file",
     "read_file_content":         "read_file",
+    "open_file":                 "read_file",
+    "get_file_content":          "read_file",
+    # filesystem — write  (edit/modify/update all mean "write")
     "write_text_file":           "write_file",
+    "write_to_file":             "write_file",
     "create_file":               "write_file",
     "save_file":                 "write_file",
+    "edit_file":                 "write_file",
+    "modify_file":               "write_file",
+    "update_file":               "write_file",
+    "append_file":               "write_file",
+    "overwrite_file":            "write_file",
+    # filesystem — directory
     "list_files":                "list_directory",
+    "list_dir":                  "list_directory",
     "list_directory_with_sizes": "list_directory",
     "ls":                        "list_directory",
     "delete_file":               "remove_file",
@@ -30,13 +49,17 @@ _TOOL_NAME_ALIAS: dict[str, str] = {
     "shell_execute":             "execute_command",
     "bash":                      "execute_command",
     "exec":                      "execute_command",
+    "execute":                   "execute_command",
     "run_bash":                  "execute_command",
+    "run_python":                "execute_command",
     # websearch
     "search_web":                "web_search",
     "internet_search":           "web_search",
+    "browse_web":                "web_search",
     "get_page":                  "fetch_page",
     "fetch_url":                 "fetch_page",
     "open_url":                  "fetch_page",
+    "browse_url":                "fetch_page",
     # time
     "current_time":              "get_current_datetime",
     "get_time":                  "get_current_datetime",
@@ -60,43 +83,81 @@ _TOOL_NAME_ALIAS: dict[str, str] = {
 _FUZZY_CUTOFF = 0.80
 
 
-def _fix_tool_name(tc: dict, tool_map: dict) -> tuple[dict, str | None]:
-    """Try to correct a hallucinated tool name before invocation.
+def correct_tool_name(name: str, tool_map: dict) -> tuple[str, str | None]:
+    """Shared core: alias table lookup + difflib fuzzy match.
 
-    Correction strategy (in order):
-    1. Exact match in tool_map  → no change needed.
-    2. Alias table lookup       → deterministic, high-confidence correction.
-    3. difflib fuzzy match      → catches variations not in the alias table.
-
-    Returns (fixed_tc, fix_description) where fix_description is None when
-    no correction was applied.  Uses '→' for alias fixes and '~>' for fuzzy
-    fixes so they are distinguishable in logs and metrics.
+    Returns (corrected_name, fix_description) where fix_description is None
+    when no correction was needed.  Used by both exec-time _fix_tool_name and
+    plan-time fix_plan_tool_names — add new aliases to _TOOL_NAME_ALIAS once
+    and both paths benefit automatically.
     """
-    name = tc["name"]
     if name in tool_map:
-        return tc, None
+        return name, None
 
-    # Strategy 1: alias table
     if name in _TOOL_NAME_ALIAS:
         corrected = _TOOL_NAME_ALIAS[name]
         if corrected in tool_map:
-            return {**tc, "name": corrected}, f"{name} → {corrected}"
+            return corrected, f"{name} → {corrected}"
 
-    # Strategy 2: difflib fuzzy match (conservative cutoff)
     candidates = difflib.get_close_matches(name, tool_map.keys(), n=1, cutoff=_FUZZY_CUTOFF)
     if candidates:
-        corrected = candidates[0]
-        return {**tc, "name": corrected}, f"{name} ~> {corrected}"
+        return candidates[0], f"{name} ~> {candidates[0]}"
 
+    return name, None
+
+
+def _fix_tool_name(tc: dict, tool_map: dict) -> tuple[dict, str | None]:
+    """Exec-time wrapper: correct hallucinated tool name in a tool-call dict."""
+    corrected, fix = correct_tool_name(tc["name"], tool_map)
+    if fix:
+        return {**tc, "name": corrected}, fix
     return tc, None
+
+
+# Pattern matching "N. tool_name: description" step format.
+_STEP_TOOL_RE = re.compile(r'^(\d+\.\s*)([A-Za-z_]\w*)(\s*:.*)', re.DOTALL)
+
+
+def fix_plan_tool_names(
+    steps: list, tool_map: dict
+) -> tuple[list, list[str]]:
+    """Plan-time: correct hallucinated tool names in Step.text fields.
+
+    Applies the same correction logic as _fix_tool_name so plan steps and
+    exec calls are always consistent.  Steps without a recognised tool-name
+    prefix are left unchanged.
+
+    Returns (fixed_steps, list_of_fix_descriptions).
+    """
+    from core.models import Step  # local import to avoid circular dependency
+
+    fixed: list[Step] = []
+    fixes: list[str] = []
+
+    for step in steps:
+        m = _STEP_TOOL_RE.match(step.text)
+        if m:
+            prefix, tool_name, rest = m.groups()
+            corrected, fix = correct_tool_name(tool_name, tool_map)
+            if fix:
+                new_text = f"{prefix}{corrected}{rest}"
+                fixed.append(Step(
+                    number=step.number, text=new_text,
+                    status=step.status, note=step.note,
+                ))
+                fixes.append(f"step {step.number}: {fix}")
+                continue
+        fixed.append(step)
+
+    return fixed, fixes
 
 
 # ---------------------------------------------------------------------------
 # Argument name correction
 # ---------------------------------------------------------------------------
 
-# Mapping of commonly hallucinated argument names → correct schema names.
-# These are patterns observed across llama3, mistral and other open-weight models.
+# Alias table for arg names that fuzzy matching alone cannot catch
+# (short abbreviations, semantically shifted names, etc.).
 _ARG_ALIAS: dict[str, str] = {
     "cmd":          "command",
     "shell_cmd":    "command",
@@ -119,15 +180,19 @@ _ARG_ALIAS: dict[str, str] = {
     "link":         "uri",
 }
 
+_ARG_FUZZY_CUTOFF = 0.75
+
 
 def _fix_args(tc: dict, tool_map: dict) -> tuple[dict, list[str]]:
     """Normalize argument names to match the tool's declared schema.
 
+    Correction order:
+    1. Key already correct → keep.
+    2. Alias table lookup  → deterministic, handles short/semantic differences.
+    3. difflib fuzzy match against schema keys → catches near-misses not in table.
+
     Handles both Pydantic-backed LangChain tools (args_schema.model_fields)
     and MCP tools that expose a raw JSON Schema dict (args_schema["properties"]).
-
-    Returns (fixed_tc, fixes_applied) where fixes_applied is a list of
-    "wrong_key → correct_key" strings for logging.
     """
     tool = tool_map.get(tc["name"])
     if tool is None:
@@ -135,10 +200,8 @@ def _fix_args(tc: dict, tool_map: dict) -> tuple[dict, list[str]]:
 
     schema = tool.args_schema
     if isinstance(schema, dict):
-        # MCP tools expose args_schema as a JSON Schema dict
         expected_keys: set[str] = set(schema.get("properties", {}).keys())
     elif hasattr(schema, "model_fields"):
-        # Native LangChain StructuredTool with Pydantic model
         expected_keys = set(schema.model_fields.keys())
     else:
         return tc, []
@@ -154,7 +217,15 @@ def _fix_args(tc: dict, tool_map: dict) -> tuple[dict, list[str]]:
             new_args[correct] = v
             fixes.append(f"{k} → {correct}")
         else:
-            new_args[k] = v
+            candidates = difflib.get_close_matches(
+                k, expected_keys, n=1, cutoff=_ARG_FUZZY_CUTOFF
+            )
+            if candidates:
+                correct = candidates[0]
+                new_args[correct] = v
+                fixes.append(f"{k} ~> {correct}")
+            else:
+                new_args[k] = v
 
     return {**tc, "args": new_args}, fixes
 
