@@ -114,6 +114,7 @@ async def run_exec_loop(
                 result = await _do_replan(
                     prompt, steps, execution_history, tools, replan_model, logger,
                     tool_failure_counts, _remaining,
+                    tool_map=tool_map,
                 )
                 if result is None:
                     logger.warning(f"[replan] LLM呼び出しがタイムアウト ({time.perf_counter() - loop_start:.0f}s)。")
@@ -197,6 +198,7 @@ async def run_exec_loop(
                 result = await _do_replan(
                     prompt, steps, execution_history, tools, replan_model, logger,
                     tool_failure_counts, _remaining,
+                    tool_map=tool_map,
                 )
                 if result is None:
                     logger.warning(f"[replan] LLM呼び出しがタイムアウト ({time.perf_counter() - loop_start:.0f}s)。")
