@@ -109,6 +109,19 @@ _SYSTEM_VARIANTS: dict[str, dict] = {
         "examples": True,
         "footer":   ["arg_names_zh"],
     },
+    # react: ReAct mode (no follow_plan — there is no pre-built plan to follow)
+    "react": {
+        "rules":    ["lang_jp", "use_tools", "one_at_a_time"],
+        "examples": True,
+        "footer":   ["arg_names"],
+    },
+    # react_zh: ReAct mode with Chinese instructions
+    "react_zh": {
+        "tool_list": _TOOL_LIST_ZH,
+        "rules":    ["lang_zh", "use_tools_zh", "one_at_a_time_zh"],
+        "examples": True,
+        "footer":   ["arg_names_zh"],
+    },
 }
 
 

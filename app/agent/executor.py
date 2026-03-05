@@ -8,6 +8,7 @@ import core.llm as llm
 from agent.exec_loop import run_exec_loop
 from agent.fixers import fix_plan_tool_names
 from agent.planner import make_plan
+from agent.react_loop import run_react_loop
 from config import FEATURES
 from core.models import format_checklist, parse_steps
 from core.prompts import CHAT_PROMPT, ROUTER_PROMPT
@@ -88,7 +89,7 @@ async def run(prompt: str) -> str | None:
         logger.info(f"[chat] answer: {answer}")
         return answer
 
-    # --- Agent mode: full Plan-and-Execute ---
+    # --- Agent mode: route by AGENT_MODE ---
     client = MultiServerMCPClient({
         "filesystem": FILESYSTEM_CONFIG,
         "shell":      SHELL_CONFIG,
@@ -100,6 +101,13 @@ async def run(prompt: str) -> str | None:
     tools = await client.get_tools()
     tool_map = {t.name: t for t in tools}
 
+    agent_mode = FEATURES.get("agent_mode", "plan_exec")
+    logger.info(f"[executor] agent_mode={agent_mode}")
+
+    if agent_mode == "react":
+        return await run_react_loop(prompt, tools, tool_map, exec_model, logger)
+
+    # plan_exec (default): Plan-and-Execute
     plan_text = await make_plan(prompt, tools, tool_map, plan_model)
     steps = parse_steps(plan_text)
     if FEATURES.get("plan_tool_name_fixer", True):

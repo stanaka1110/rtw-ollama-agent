@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from config import LOG_DIR, LOG_LEVEL, PROMPT_VARIANT, TASK_ID, TASK_TIER
+from config import FEATURES, LOG_DIR, LOG_LEVEL, PROMPT_VARIANT, TASK_ID, TASK_TIER
 from core.models import Step, format_checklist
 
 METRICS_FILE = LOG_DIR / "metrics.jsonl"
@@ -114,14 +114,16 @@ class MetricsLogger:
         # Error Rate: fraction of tool calls that returned an error
         error_rate = len(error_turns) / len(tool_turns) if tool_turns else 0.0
 
-        done_count = sum(1 for s in steps if s.status == "done")
-        step_completion_rate = done_count / len(steps) if steps else 0.0
+        total_steps = len(steps)
+        done_count  = sum(1 for s in steps if s.status == "done")
+        step_completion_rate = round(done_count / total_steps, 3) if total_steps else None
 
         record = {
             "session_id":           self.session_id,
             "timestamp":            datetime.now().isoformat(),
             "model":                self.model_name,
             "prompt_variant":       self._prompt_variant,
+            "agent_mode":           FEATURES.get("agent_mode", "plan_exec"),
             "task_tier":            self._task_tier,
             "task_id":              self._task_id,
             "termination":          termination,
@@ -131,10 +133,10 @@ class MetricsLogger:
             "tool_name_accuracy":   round(tool_name_accuracy, 3),
             "arg_fit_rate":         round(arg_fit_rate, 3),
             "error_rate":           round(error_rate, 3),
-            "step_completion_rate": round(step_completion_rate, 3),
+            "step_completion_rate": step_completion_rate,
             "replan_count":         self._replan_count,
             "total_turns":          total_turns,
-            "total_steps":          len(steps),
+            "total_steps":          total_steps,
             "done_steps":           done_count,
             "tool_name_fixes":      len(name_fix_turns),
             "arg_fixes":            len(arg_fix_turns),

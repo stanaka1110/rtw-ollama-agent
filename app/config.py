@@ -32,7 +32,12 @@ LOG_DIR = Path("/app/logs")
 # Toggle experimental or optional behaviours without touching logic code.
 # Each flag is a bool; set to False to disable a feature entirely.
 #
-FEATURES: dict[str, bool] = {
+FEATURES: dict[str, bool | str] = {
+    # Agent execution mode (overridable via AGENT_MODE env var).
+    #   "plan_exec" — Plan-and-Execute (default): planner → exec loop → replan
+    #   "react"     — ReAct loop: single phase, reason-act without pre-planning
+    "agent_mode": os.environ.get("AGENT_MODE", "plan_exec"),
+
     # Trim long ToolMessage content before adding to the LLM context.
     # Prevents context overflow when fetch_page / read_file return large text.
     "tool_result_trimming": True,

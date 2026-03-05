@@ -5,10 +5,11 @@ set -euo pipefail
 #
 # Usage: ./bench.sh [options]
 #   --tier    quick|easy|medium|hard|all  (default: medium)
-#   --prompt  default|v1|v2              (default: default)
+#   --prompt  default|v1|v2|zh           (default: default)
 #   --models  m1,m2,...                  (default: qwen2.5:3b,qwen2.5:7b,qwen2.5:14b)
+#   --mode    plan_exec|react            (default: plan_exec)
 #
-# Env vars: TIER / PROMPT_VARIANT — same as --tier / --prompt flags
+# Env vars: TIER / PROMPT_VARIANT / MODE — same as --tier / --prompt / --mode flags
 #
 # Tiers:
 #   quick  — 3 tasks: chat routing, single tool, simple multi-step
@@ -34,15 +35,19 @@ set -euo pipefail
 #   ./bench.sh --tier quick --models qwen2.5:3b,llama3.2:3b
 #   ./bench.sh --tier all --prompt v1
 #   PROMPT_VARIANT=v2 ./bench.sh --models qwen2.5:14b
+#   ./bench.sh --tier medium --models qwen2.5:14b --prompt zh --mode react
+#   ./bench.sh --tier medium --models qwen2.5:14b --prompt zh --mode plan_exec
 
 TIER="${TIER:-medium}"
 PROMPT_VARIANT="${PROMPT_VARIANT:-default}"
+MODE="${MODE:-plan_exec}"
 MODELS=("qwen2.5:3b" "qwen2.5:7b" "qwen2.5:14b")
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --tier)    TIER="$2";                              shift 2 ;;
         --prompt)  PROMPT_VARIANT="$2";                    shift 2 ;;
+        --mode)    MODE="$2";                              shift 2 ;;
         --models)  IFS=',' read -r -a MODELS <<< "$2";    shift 2 ;;
         *)         echo "Unknown option: $1" >&2; exit 1 ;;
     esac
@@ -90,7 +95,7 @@ mkdir -p "$RUN_DIR"
 RESULTS_FILE="$RUN_DIR/results.txt"
 
 echo "# Agent ベンチマーク  $(date '+%Y-%m-%d %H:%M')" | tee "$RESULTS_FILE"
-echo "# tier=$TIER  prompt=$PROMPT_VARIANT  models=${MODELS[*]}" | tee -a "$RESULTS_FILE"
+echo "# tier=$TIER  prompt=$PROMPT_VARIANT  mode=$MODE  models=${MODELS[*]}" | tee -a "$RESULTS_FILE"
 echo "" | tee -a "$RESULTS_FILE"
 
 METRICS_LINES_BEFORE=$(docker exec langchain_app sh -c \
@@ -102,6 +107,7 @@ _run_task() {
     docker exec \
         -e OLLAMA_MODEL="$MODEL" \
         -e PROMPT_VARIANT="$PROMPT_VARIANT" \
+        -e AGENT_MODE="$MODE" \
         -e TASK_TIER="$TIER" \
         -e TASK_ID="$((TASK_IDX+1))" \
         -e LOG_LEVEL=DEBUG \
@@ -179,19 +185,24 @@ for r in records:
     m = r.get("model", "unknown")
     stats[m]["tca"].append(r.get("tca", 0))
     stats[m]["err_rate"].append(r.get("error_rate", 0))
-    stats[m]["step_cr"].append(r.get("step_completion_rate", 0))
+    stats[m]["step_cr"].append(r.get("step_completion_rate"))  # may be None (react mode)
     stats[m]["replans"].append(r.get("replan_count", 0))
     stats[m]["turns"].append(r.get("total_turns", 0))
     stats[m]["elapsed"].append(r.get("elapsed_sec", 0))
     stats[m]["count"] += 1
 
 avg = lambda lst: round(sum(lst) / len(lst), 3) if lst else 0.0
+avg_nullable = lambda lst: (lambda v: round(v, 3) if v is not None else None)(
+    (lambda vals: sum(vals) / len(vals) if vals else None)([x for x in lst if x is not None])
+)
 
 print(f"\n{'Model':<20} {'Runs':>4} {'StepCR':>7} {'TCA':>6} "
       f"{'ErrRate':>8} {'Replans':>8} {'AvgTurns':>9} {'AvgSec':>8}")
 print("-" * 80)
 for model, d in sorted(stats.items()):
-    print(f"{model:<20} {d['count']:>4} {avg(d['step_cr']):>7.3f} {avg(d['tca']):>6.3f} "
+    scr = avg_nullable(d['step_cr'])
+    scr_str = f"{scr:.3f}" if scr is not None else "  N/A"
+    print(f"{model:<20} {d['count']:>4} {scr_str:>7} {avg(d['tca']):>6.3f} "
           f"{avg(d['err_rate']):>8.3f} {avg(d['replans']):>8.1f} "
           f"{avg(d['turns']):>9.1f} {avg(d['elapsed']):>8.0f}")
 print("=" * 80)
