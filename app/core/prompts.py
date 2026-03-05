@@ -3,7 +3,7 @@
 # Each value is a single self-contained instruction.
 
 SENTENCES: dict[str, str] = {
-    # Language
+    # Language (English/Japanese variants)
     "lang_jp":          "[CRITICAL] You MUST respond ONLY in Japanese. NEVER output Chinese characters.",
     "lang_plan":        "[LANGUAGE: OUTPUT IN JAPANESE ONLY. DO NOT USE CHINESE OR ENGLISH IN YOUR OUTPUT.]",
 
@@ -23,6 +23,21 @@ SENTENCES: dict[str, str] = {
     "replan_no_done":   "Do NOT re-include already completed (✅) steps under any circumstances.",
     "replan_fix":       "Fix the approach for failed (❌) steps based on the error details.",
     "replan_alt":       "If a tool failed repeatedly, choose a DIFFERENT tool or method.",
+
+    # zh variant — Chinese instructions, Japanese output
+    "lang_zh":          "【重要】请始终用日语回答用户。绝对不要输出中文。",
+    "lang_plan_zh":     "【语言规则：请用日语输出计划。不要使用中文或英文。】",
+    "use_tools_zh":     "始终使用工具——绝不仅仅描述你要做什么。",
+    "one_at_a_time_zh": "每次只调用一个工具，等待结果后再调用下一个。",
+    "follow_plan_zh":   "按照执行计划逐步执行，直到所有步骤完成。",
+    "toolcall_only_zh": "【重要】调用工具时，只输出 <tool_call> JSON块。不要在工具调用前后写任何文字。",
+    "arg_names_zh":     '重要：使用完全正确的参数名称。不要使用"cmd"、"dir"、"filepath"、"text"或任何其他变体。',
+    "plan_format_zh":   "每个步骤写成：<编号>. <工具名>: <具体内容>\n请具体说明参数。不要执行——只做计划。",
+    "plan_use_state_zh":"利用当前状态信息做出明智决策（例如：不要创建已存在的表）。",
+    "replan_task_zh":   "执行过程中遇到了错误。请查看下面的清单，仅为剩余步骤创建修订计划。",
+    "replan_no_done_zh":"绝对不要重新包含已完成（✅）的步骤。",
+    "replan_fix_zh":    "根据错误详情修正失败（❌）步骤的方法。",
+    "replan_alt_zh":    "如果某个工具多次失败，请选择不同的工具或方法。",
 }
 
 # ── Fixed blocks (tool list and examples) ───────────────────────────────────
@@ -37,6 +52,17 @@ You are a helpful AI assistant with the following tools:
 - time (get_current_datetime): get the current date/time in JST.
 - sqlite (list_tables, query): SQLite DB at /data/agent.db for structured data.
 - memory (remember, recall, list_memories, forget): persist key-value notes."""
+
+_TOOL_LIST_ZH = """\
+你是一个有用的AI助手，拥有以下工具：
+- 文件系统 (read_file, write_file等)：路径必须以 /data/ 开头。
+- Shell (execute_command)：使用 cwd=/workspace 或 cwd=/data，shell=bash。
+  运行Python文件时，使用：python3 /data/<文件名>（不要用 ./文件名）。
+- 网络搜索 (web_search, fetch_page)：搜索互联网。
+  web_search后，对最佳URL调用fetch_page获取实际内容。
+- 时间 (get_current_datetime)：获取日本标准时间（JST）的当前日期/时间。
+- SQLite (list_tables, query)：/data/agent.db 中的SQLite数据库，用于结构化数据。
+- 内存 (remember, recall, list_memories, forget)：持久化键值笔记。"""
 
 _TOOL_EXAMPLES = """\
 ## Tool call examples (correct argument names)
@@ -75,12 +101,22 @@ _SYSTEM_VARIANTS: dict[str, dict] = {
         "examples": True,
         "footer":   ["arg_names"],
     },
+    # zh: Chinese instructions → better instruction-following for qwen2.5 small models
+    #     Output is still Japanese (lang_zh rule enforces it)
+    "zh": {
+        "tool_list": _TOOL_LIST_ZH,
+        "rules":    ["lang_zh", "use_tools_zh", "one_at_a_time_zh", "follow_plan_zh"],
+        "examples": True,
+        "footer":   ["arg_names_zh"],
+    },
 }
 
 
 def build_system_prompt(variant: str = "default") -> str:
     cfg = _SYSTEM_VARIANTS.get(variant, _SYSTEM_VARIANTS["default"])
-    parts = [_TOOL_LIST, "Rules:"]
+    tool_list = cfg.get("tool_list", _TOOL_LIST)
+    header = "规则：" if variant == "zh" else "Rules:"
+    parts = [tool_list, header]
     for i, key in enumerate(cfg["rules"], 1):
         parts.append(f"{i}. {SENTENCES[key]}")
     if cfg.get("examples"):
@@ -90,8 +126,17 @@ def build_system_prompt(variant: str = "default") -> str:
     return "\n".join(parts)
 
 
-def build_plan_prompt(variant: str = "default") -> str:  # noqa: ARG001 (variant reserved)
+def build_plan_prompt(variant: str = "default") -> str:
     s = SENTENCES
+    if variant == "zh":
+        return (
+            s["lang_plan_zh"] + "\n\n"
+            "你是一个任务规划师。根据用户请求、当前系统状态和可用工具，输出具体的编号执行计划。\n"
+            + s["plan_format_zh"] + "\n"
+            + s["plan_use_state_zh"] + "\n\n"
+            "当前系统状态：\n{current_state}\n\n"
+            "可用工具：\n{tool_descriptions}"
+        )
     return (
         s["lang_plan"] + "\n\n"
         "You are a task planner. Given a user request, the current system state, "
@@ -103,8 +148,17 @@ def build_plan_prompt(variant: str = "default") -> str:  # noqa: ARG001 (variant
     )
 
 
-def build_replan_prompt(variant: str = "default") -> str:  # noqa: ARG001
+def build_replan_prompt(variant: str = "default") -> str:
     s = SENTENCES
+    if variant == "zh":
+        rules = [s["replan_no_done_zh"], s["replan_fix_zh"], s["replan_alt_zh"]]
+        return (
+            s["lang_plan_zh"] + "\n\n"
+            "你是一个任务规划师。" + s["replan_task_zh"] + "\n"
+            "绝对规则：\n"
+            + "\n".join(f"- {r}" for r in rules) + "\n\n"
+            "可用工具：\n{tool_descriptions}"
+        )
     rules = [s["replan_no_done"], s["replan_fix"], s["replan_alt"]]
     return (
         s["lang_plan"] + "\n\n"
