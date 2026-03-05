@@ -118,7 +118,7 @@ _SYSTEM_VARIANTS: dict[str, dict] = {
     # react_zh: ReAct mode with Chinese instructions
     "react_zh": {
         "tool_list": _TOOL_LIST_ZH,
-        "rules":    ["lang_zh", "use_tools_zh", "one_at_a_time_zh"],
+        "rules":    ["lang_zh", "toolcall_only_zh", "use_tools_zh", "one_at_a_time_zh"],
         "examples": True,
         "footer":   ["arg_names_zh"],
     },
@@ -128,7 +128,7 @@ _SYSTEM_VARIANTS: dict[str, dict] = {
 def build_system_prompt(variant: str = "default") -> str:
     cfg = _SYSTEM_VARIANTS.get(variant, _SYSTEM_VARIANTS["default"])
     tool_list = cfg.get("tool_list", _TOOL_LIST)
-    header = "规则：" if variant == "zh" else "Rules:"
+    header = "规则：" if "zh" in variant else "Rules:"
     parts = [tool_list, header]
     for i, key in enumerate(cfg["rules"], 1):
         parts.append(f"{i}. {SENTENCES[key]}")
