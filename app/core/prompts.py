@@ -118,7 +118,7 @@ _SYSTEM_VARIANTS: dict[str, dict] = {
     # react_zh: ReAct mode with Chinese instructions
     "react_zh": {
         "tool_list": _TOOL_LIST_ZH,
-        "rules":    ["lang_zh", "toolcall_only_zh", "use_tools_zh", "one_at_a_time_zh"],
+        "rules":    ["lang_zh", "use_tools_zh", "one_at_a_time_zh"],
         "examples": True,
         "footer":   ["arg_names_zh"],
     },
