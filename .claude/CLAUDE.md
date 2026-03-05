@@ -42,6 +42,46 @@ docs/
 
 ---
 
+## モジュール依存関係
+
+レイヤー順（上が下に依存しない）。
+
+```
+[Layer 0] 内部依存なし
+  config.py
+  core/models.py
+  servers/
+  agent/fixers.py
+
+[Layer 1] → Layer 0 のみ
+  core/prompts.py      → config
+  core/llm.py          → config
+  core/utils.py        → config, core/models
+  agent/loop_helpers.py → config, core/models
+  agent/termination.py  → core/utils (遅延import)
+
+[Layer 2] → Layer 0-1
+  agent/planner.py     → agent/fixers, config, core/{models,prompts,utils}
+
+[Layer 3] → Layer 0-2
+  agent/exec_loop.py   → config, agent/{fixers,loop_helpers}, core/{models,prompts,utils}
+  agent/react_loop.py  → config, agent/{fixers,loop_helpers,planner,termination}, core/{prompts,utils}
+
+[Layer 4] エントリポイント直下
+  agent/executor.py    → core/llm, agent/{exec_loop,react_loop,planner,fixers},
+                         core/{models,prompts,utils}, servers
+
+[Entrypoints]
+  main.py / web_server.py → agent/executor
+```
+
+### 注意点
+- `config.py` はすべてのモジュールの根。循環参照不可
+- `agent/termination.py` の `core/utils` 参照は `check()` 内の遅延 import（循環回避）
+- `agent/fixers.py` は内部依存ゼロ — 単体テスト・再利用が容易
+
+---
+
 ## 設定・フラグ (`app/config.py`)
 
 ### 環境変数

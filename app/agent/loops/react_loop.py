@@ -16,10 +16,10 @@ import time
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from agent.fixers import _fix_args, _fix_content, _fix_tool_name
-from agent.loop_helpers import _apply_window, _invoke_tool, _trim_tool_result
-from agent.planner import gather_current_state
-from config import EXEC_TIMEOUT, FEATURES, MAX_STEPS, PROMPT_VARIANT
+from agent.base.termination import get_termination_strategy
+from agent.components.loop_helpers import _apply_window, _invoke_tool, _trim_tool_result, apply_fixers
+from agent.components.planner import gather_current_state
+from config import EXEC_TIMEOUT, FEATURES, MAX_STEPS, PROMPT_VARIANT, REACT_TERMINATION
 from core.prompts import build_system_prompt
 from core.utils import MetricsLogger, _sanitize
 
@@ -55,7 +55,8 @@ async def run_react_loop(
     else:
         human_content = f"Task: {prompt}"
 
-    llm_with_tools = model.bind_tools(tools)
+    strategy = get_termination_strategy(REACT_TERMINATION)
+    llm_with_tools = model.bind_tools(tools + strategy.extra_tools)
     model_name: str = getattr(model, "model", "unknown")
     metrics = MetricsLogger(model_name=model_name, prompt=prompt)
 
@@ -103,34 +104,21 @@ async def run_react_loop(
             return f"[エラー] このモデルはツール呼び出しに非対応か、LLM呼び出しに失敗しました: {e}"
         logger.info(f"[react:llm] done in {time.perf_counter() - t0:.1f}s")
 
-        if not response.tool_calls:
+        result = strategy.check(response)
+        if result.should_stop:
             metrics.log_turn(turn=turn + 1, tool_called=False)
-            answer = _sanitize(response.content)
-            logger.info(f"final answer:\n{answer}")
+            logger.info(f"final answer:\n{result.answer}")
             metrics.write_summary([], termination="answer")
-            return answer
+            return result.answer
+
+        if result.feedback:
+            metrics.log_turn(turn=turn + 1, tool_called=False)
+            messages.append(AIMessage(content=response.content or ""))
+            messages.append(HumanMessage(content=result.feedback))
+            continue
 
         tc = response.tool_calls[0]
-
-        # --- Tool Name Fixer ---
-        tool_name_fix = None
-        if FEATURES.get("tool_name_fixer", True):
-            tc, tool_name_fix = _fix_tool_name(tc, tool_map)
-            if tool_name_fix:
-                logger.warning(f"[tool_fix] {tool_name_fix}")
-
-        # --- Arg Fixer ---
-        arg_fixes: list[str] = []
-        if FEATURES.get("arg_fixer", True):
-            tc, arg_fixes = _fix_args(tc, tool_map)
-            if arg_fixes:
-                logger.warning(f"[arg_fix] {tc['name']}: {', '.join(arg_fixes)}")
-
-        # --- Content Fixer ---
-        if FEATURES.get("content_fixer", True):
-            tc, content_fix = _fix_content(tc)
-            if content_fix:
-                logger.warning(f"[content_fix] {tc['name']}: {content_fix}")
+        tc, tool_name_fix, arg_fixes = apply_fixers(tc, tool_map, logger)
 
         logger.info(f"[Tool Call] {tc['name']}({tc['args']})")
         messages.append(AIMessage(content=response.content, tool_calls=[tc]))

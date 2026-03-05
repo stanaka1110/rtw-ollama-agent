@@ -6,7 +6,7 @@ import time
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from agent.fixers import fix_plan_tool_names
+from agent.base.fixers import fix_plan_tool_names
 from config import FEATURES
 from core.models import Step, format_checklist, parse_steps
 from core.prompts import PLAN_PROMPT, REPLAN_PROMPT
@@ -112,6 +112,32 @@ async def make_plan(prompt: str, tools: list, tool_map: dict, model) -> str:
     result = (await model.ainvoke(messages)).content
     logger.info(f"[plan:llm] done in {time.perf_counter() - t0:.1f}s")
     return result
+
+
+async def make_plan_steps(
+    prompt: str,
+    tools: list,
+    tool_map: dict,
+    model,
+    run_logger=None,
+) -> list[Step]:
+    """Plan, parse, and fix tool names in one call.
+
+    Replaces the make_plan + parse_steps + fix_plan_tool_names sequence that
+    previously lived in executor.py.  Keeps executor at Layer 4 with no direct
+    dependency on agent.base.fixers.
+
+    run_logger — caller's logger for fix/plan log lines (falls back to module logger).
+    """
+    log = run_logger or logger
+    plan_text = await make_plan(prompt, tools, tool_map, model)
+    steps = parse_steps(plan_text)
+    if tool_map and FEATURES.get("plan_tool_name_fixer", True):
+        steps, plan_fixes = fix_plan_tool_names(steps, tool_map)
+        for fix in plan_fixes:
+            log.warning(f"[plan_fix] {fix}")
+    log.info(f"[plan]\n{format_checklist(steps)}")
+    return steps
 
 
 async def replan(

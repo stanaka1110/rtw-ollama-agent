@@ -5,12 +5,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 import core.llm as llm
-from agent.exec_loop import run_exec_loop
-from agent.fixers import fix_plan_tool_names
-from agent.planner import make_plan
-from agent.react_loop import run_react_loop
-from config import FEATURES
-from core.models import format_checklist, parse_steps
+from agent.components.planner import make_plan_steps
+from agent.loops.exec_loop import run_exec_loop
+from agent.loops.react_loop import run_react_loop
+from config import AGENT_MODE, FEATURES
 from core.prompts import CHAT_PROMPT, ROUTER_PROMPT
 from core.utils import _sanitize, setup_logging
 from servers import (
@@ -101,19 +99,12 @@ async def run(prompt: str) -> str | None:
     tools = await client.get_tools()
     tool_map = {t.name: t for t in tools}
 
-    agent_mode = FEATURES.get("agent_mode", "plan_exec")
-    logger.info(f"[executor] agent_mode={agent_mode}")
+    logger.info(f"[executor] agent_mode={AGENT_MODE}")
 
-    if agent_mode == "react":
+    if AGENT_MODE == "react":
         return await run_react_loop(prompt, tools, tool_map, exec_model, logger)
 
     # plan_exec (default): Plan-and-Execute
-    plan_text = await make_plan(prompt, tools, tool_map, plan_model)
-    steps = parse_steps(plan_text)
-    if FEATURES.get("plan_tool_name_fixer", True):
-        steps, plan_fixes = fix_plan_tool_names(steps, tool_map)
-        for fix in plan_fixes:
-            logger.warning(f"[plan_fix] {fix}")
-    logger.info(f"[plan]\n{format_checklist(steps)}")
+    steps = await make_plan_steps(prompt, tools, tool_map, plan_model, logger)
     return await run_exec_loop(prompt, steps, tools, tool_map, exec_model, logger,
                                replan_model=replan_model)

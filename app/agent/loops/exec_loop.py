@@ -4,8 +4,8 @@ Drives the agent through its plan: calls the LLM, dispatches tool calls,
 updates step status, and triggers replanning on failures.
 
 Helpers are split across:
-  agent/fixers.py      — tool name / arg / content correction
-  agent/loop_helpers.py — tool invocation, step status, trimming, window, watchdog
+  agent/base/fixers.py           — tool name / arg / content correction (via apply_fixers)
+  agent/components/loop_helpers  — tool invocation, step status, trimming, window, watchdog
 """
 
 import asyncio
@@ -21,14 +21,14 @@ from config import (
     MAX_REPLANS,
     MAX_STEPS,
 )
-from agent.fixers import _fix_args, _fix_content, _fix_tool_name
-from agent.loop_helpers import (
+from agent.components.loop_helpers import (
     _apply_window,
     _build_watchdog_hint,
     _do_replan,
     _invoke_tool,
     _trim_tool_result,
     _update_step,
+    apply_fixers,
 )
 from core.models import Step, format_checklist
 from core.prompts import SYSTEM_PROMPT
@@ -131,26 +131,7 @@ async def run_exec_loop(
             return answer
 
         tc = response.tool_calls[0]
-
-        # --- Tool Name Fixer: correct hallucinated tool names ---
-        tool_name_fix = None
-        if FEATURES.get("tool_name_fixer", True):
-            tc, tool_name_fix = _fix_tool_name(tc, tool_map)
-            if tool_name_fix:
-                logger.warning(f"[tool_fix] {tool_name_fix}")
-
-        # --- Arg Fixer: normalize argument names before invocation ---
-        arg_fixes: list[str] = []
-        if FEATURES.get("arg_fixer", True):
-            tc, arg_fixes = _fix_args(tc, tool_map)
-            if arg_fixes:
-                logger.warning(f"[arg_fix] {tc['name']}: {', '.join(arg_fixes)}")
-
-        # --- Content Fixer: unescape literal \\n in write_file content ---
-        if FEATURES.get("content_fixer", True):
-            tc, content_fix = _fix_content(tc)
-            if content_fix:
-                logger.warning(f"[content_fix] {tc['name']}: {content_fix}")
+        tc, tool_name_fix, arg_fixes = apply_fixers(tc, tool_map, logger)
 
         logger.info(f"[Tool Call] {tc['name']}({tc['args']})")
         messages.append(AIMessage(content=response.content, tool_calls=[tc]))

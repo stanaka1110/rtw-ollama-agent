@@ -1,17 +1,19 @@
 """Execution loop helper utilities.
 
-Low-level helpers used by run_exec_loop():
+Low-level helpers used by run_exec_loop() and run_react_loop():
   - Tool invocation and step status updates
   - Tool result trimming to prevent context overflow
   - Sliding window message history management
   - Watchdog detection of repeatedly failing tools
   - Replan wrapper with timeout handling
+  - apply_fixers: single entry point for all tool-call corrections
 """
 
 import asyncio
 
 from langchain_core.tools import ToolException
 
+from agent.base.fixers import _fix_args, _fix_content, _fix_tool_name
 from config import (
     FEATURES,
     MESSAGE_WINDOW_HEAD,
@@ -67,6 +69,46 @@ def _update_step(steps: list[Step], idx: int, is_error: bool, result_str: str) -
             steps[idx].note = result_str[:80]
             idx += 1
     return idx
+
+
+# ---------------------------------------------------------------------------
+# Fixer pipeline
+# ---------------------------------------------------------------------------
+
+def apply_fixers(
+    tc: dict,
+    tool_map: dict,
+    logger,
+) -> tuple[dict, str | None, list[str]]:
+    """Apply tool_name_fixer, arg_fixer, and content_fixer to a tool call.
+
+    Consolidates all three correction passes so loops only depend on this
+    module rather than importing agent.base.fixers directly.
+
+    Returns:
+        (fixed_tc, tool_name_fix, arg_fixes)
+        tool_name_fix — fix description string, or None if unchanged
+        arg_fixes     — list of arg fix descriptions (empty if none)
+    """
+    tool_name_fix: str | None = None
+    arg_fixes: list[str] = []
+
+    if FEATURES.get("tool_name_fixer", True):
+        tc, tool_name_fix = _fix_tool_name(tc, tool_map)
+        if tool_name_fix:
+            logger.warning(f"[tool_fix] {tool_name_fix}")
+
+    if FEATURES.get("arg_fixer", True):
+        tc, arg_fixes = _fix_args(tc, tool_map)
+        if arg_fixes:
+            logger.warning(f"[arg_fix] {tc['name']}: {', '.join(arg_fixes)}")
+
+    if FEATURES.get("content_fixer", True):
+        tc, content_fix = _fix_content(tc)
+        if content_fix:
+            logger.warning(f"[content_fix] {tc['name']}: {content_fix}")
+
+    return tc, tool_name_fix, arg_fixes
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +176,7 @@ async def _do_replan(
     remaining_fn() — 残り秒数を返す callable (タイムアウト計算用)。
     tool_map       — plan_tool_name_fixer に使用。
     """
-    from agent.planner import _apply_replan  # avoid circular import at module level
+    from agent.components.planner import _apply_replan  # avoid circular import at module level
 
     watchdog_hint = ""
     if FEATURES.get("watchdog", True):

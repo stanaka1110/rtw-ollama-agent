@@ -7,7 +7,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.models import Step
-from agent.planner import _apply_replan, gather_current_state
+from agent.components.planner import _apply_replan, gather_current_state, make_plan_steps
 
 
 def _make_tool(return_value=None, side_effect=None):
@@ -51,15 +51,59 @@ async def test_gather_current_state_missing_tool():
 
 
 @pytest.mark.asyncio
-async def test_gather_current_state_error():
+async def test_gather_current_state_list_tables_error_is_silent():
+    # list_tables failure is silently swallowed; other tools still populate.
     tool_map = {
         "list_tables":    _make_tool(side_effect=Exception("db unavailable")),
         "list_directory": _make_tool("file.txt"),
         "list_memories":  _make_tool("mem"),
     }
     result = await gather_current_state(tool_map)
-    assert "(error: db unavailable)" in result
-    assert "file.txt" in result
+    assert "SQLite tables" not in result          # tables section absent on error
+    assert "file.txt" in result                   # directory listing still present
+    assert "mem" in result                        # memories still present
+
+
+@pytest.mark.asyncio
+async def test_gather_current_state_parallel_tool_error():
+    # Errors in parallel tools (list_directory, list_memories) are reported inline.
+    tool_map = {
+        "list_directory": _make_tool(side_effect=Exception("no access")),
+        "list_memories":  _make_tool("mem"),
+    }
+    result = await gather_current_state(tool_map)
+    assert "(error: no access)" in result
+    assert "mem" in result
+
+
+@pytest.mark.asyncio
+async def test_make_plan_steps_returns_parsed_steps():
+    # Prompt without filesystem keywords → state gathering skipped.
+    plan_text = "1. do something\n2. verify result"
+    model = MagicMock()
+    model.ainvoke = AsyncMock(return_value=MagicMock(content=plan_text))
+    logger = MagicMock()
+
+    steps = await make_plan_steps("do task", [], {}, model, logger)
+
+    assert len(steps) == 2
+    assert steps[0].text == "1. do something"
+    assert steps[1].text == "2. verify result"
+    assert all(s.status == "pending" for s in steps)
+
+
+@pytest.mark.asyncio
+async def test_make_plan_steps_fixes_tool_names():
+    plan_text = "1. open_file: read the config"
+    model = MagicMock()
+    model.ainvoke = AsyncMock(return_value=MagicMock(content=plan_text))
+    tool_map = {"read_file": MagicMock()}
+    logger = MagicMock()
+
+    steps = await make_plan_steps("do task", [], tool_map, model, logger)
+
+    assert steps[0].text == "1. read_file: read the config"
+    logger.warning.assert_called()   # fix was logged
 
 
 @pytest.mark.asyncio

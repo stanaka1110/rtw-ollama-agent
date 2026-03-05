@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from config import FEATURES, LOG_DIR, LOG_LEVEL, PROMPT_VARIANT, TASK_ID, TASK_TIER
+from config import AGENT_MODE, FEATURES, LOG_DIR, LOG_LEVEL, PROMPT_VARIANT, TASK_ID, TASK_TIER
 from core.models import Step, format_checklist
 
 METRICS_FILE = LOG_DIR / "metrics.jsonl"
@@ -123,7 +123,7 @@ class MetricsLogger:
             "timestamp":            datetime.now().isoformat(),
             "model":                self.model_name,
             "prompt_variant":       self._prompt_variant,
-            "agent_mode":           FEATURES.get("agent_mode", "plan_exec"),
+            "agent_mode":           AGENT_MODE,
             "task_tier":            self._task_tier,
             "task_id":              self._task_id,
             "termination":          termination,

@@ -20,6 +20,13 @@ LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "WARNING")
 TASK_TIER: str = os.environ.get("TASK_TIER", "")
 TASK_ID:   str = os.environ.get("TASK_ID", "")
 
+# Strategy name for the ReAct loop termination logic.
+# See app/agent/termination.py for available strategies.
+#   "text"        — any text response ends the loop (current default)
+#   "finish_tool" — loop ends only when the model calls finish()
+AGENT_MODE:        str = os.environ.get("AGENT_MODE", "plan_exec")
+REACT_TERMINATION: str = os.environ.get("REACT_TERMINATION", "text")
+
 MAX_STEPS = 30
 MAX_FAILURES_BEFORE_REPLAN = 1
 MAX_REPLANS = 3
@@ -32,12 +39,7 @@ LOG_DIR = Path("/app/logs")
 # Toggle experimental or optional behaviours without touching logic code.
 # Each flag is a bool; set to False to disable a feature entirely.
 #
-FEATURES: dict[str, bool | str] = {
-    # Agent execution mode (overridable via AGENT_MODE env var).
-    #   "plan_exec" — Plan-and-Execute (default): planner → exec loop → replan
-    #   "react"     — ReAct loop: single phase, reason-act without pre-planning
-    "agent_mode": os.environ.get("AGENT_MODE", "plan_exec"),
-
+FEATURES: dict[str, bool] = {
     # Trim long ToolMessage content before adding to the LLM context.
     # Prevents context overflow when fetch_page / read_file return large text.
     "tool_result_trimming": True,
