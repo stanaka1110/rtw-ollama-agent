@@ -32,7 +32,7 @@ SENTENCES: dict[str, str] = {
     "follow_plan_zh":   "按照执行计划逐步执行，直到所有步骤完成。",
     "toolcall_only_zh": "【重要】调用工具时，只输出 <tool_call> JSON块。不要在工具调用前后写任何文字。",
     "arg_names_zh":     '重要：使用完全正确的参数名称。不要使用"cmd"、"dir"、"filepath"、"text"或任何其他变体。',
-    "plan_format_zh":   "输出编号列表，每行格式为：<工具名>: <具体内容>\n请具体说明参数。不要执行——只做计划。",
+    "plan_format_zh":   "输出编号步骤列表，格式示例：\n1. list_tables: 确认数据库中的表\n2. write_file: 将结果写入/data/result.txt\n请具体说明每步参数。不要执行——只做计划。",
     "plan_use_state_zh":"利用当前状态信息做出明智决策（例如：不要创建已存在的表）。",
     "replan_task_zh":   "执行过程中遇到了错误。请查看下面的清单，仅为剩余步骤创建修订计划。",
     "replan_no_done_zh":"绝对不要重新包含已完成（✅）的步骤。",
