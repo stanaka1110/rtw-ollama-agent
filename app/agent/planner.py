@@ -1,3 +1,4 @@
+import ast
 import asyncio
 import logging
 import re
@@ -21,6 +22,34 @@ _STATE_NEEDED_RE = re.compile(
 )
 
 
+def _parse_tables(result) -> list[str]:
+    """list_tables の ainvoke 結果からテーブル名リストを抽出する。
+
+    MCP ツールの戻り値は [{'type': 'text', 'text': "['t1', 't2']", ...}] 形式。
+    """
+    if isinstance(result, list):
+        for block in result:
+            if isinstance(block, dict) and isinstance(block.get("text"), str):
+                try:
+                    tables = ast.literal_eval(block["text"])
+                    if isinstance(tables, list):
+                        return [t for t in tables if isinstance(t, str)]
+                except Exception:
+                    pass
+    # フォールバック: 文字列からパターンマッチ
+    text = str(result)
+    for pat in [r"'text':\s*\"(\[[^\"]*\])\"", r"'text':\s*'(\[[^']*\])'"]:
+        m = re.search(pat, text)
+        if m:
+            try:
+                tables = ast.literal_eval(m.group(1))
+                if isinstance(tables, list):
+                    return [t for t in tables if isinstance(t, str)]
+            except Exception:
+                pass
+    return []
+
+
 async def gather_current_state(tool_map: dict, prompt: str = "") -> str:
     if FEATURES.get("state_skip_optimization", True) and prompt and not _STATE_NEEDED_RE.search(prompt):
         logger.info("[gather_state] skipped (no filesystem/DB keywords in prompt)")
@@ -36,13 +65,35 @@ async def gather_current_state(tool_map: dict, prompt: str = "") -> str:
             return f"[{label}]\n(error: {e})"
 
     t0 = time.perf_counter()
-    logger.info("[gather_state] start (parallel)")
-    results = await asyncio.gather(
-        _fetch("list_tables",    "SQLite tables",   {}),
-        _fetch("list_directory", "Files in /data",  {"path": "/data"}),
+    logger.info("[gather_state] start")
+
+    # list_tables を先に取得してスキーマ探索に使う
+    tables_raw = None
+    if "list_tables" in tool_map:
+        try:
+            tables_raw = await tool_map["list_tables"].ainvoke({})
+        except Exception:
+            pass
+
+    table_names = _parse_tables(tables_raw) if tables_raw is not None else []
+
+    # ディレクトリ・メモリ・各テーブルスキーマを並列取得
+    schema_fetches = [
+        _fetch("query", f"Schema of '{t}' (column names/types)", {"sql": f"PRAGMA table_info({t})"})
+        for t in table_names
+        if "query" in tool_map
+    ]
+    parallel_results = await asyncio.gather(
+        _fetch("list_directory", "Files in /data", {"path": "/data"}),
         _fetch("list_memories",  "Stored memories", {}),
+        *schema_fetches,
     )
-    parts = [r for r in results if r is not None]
+
+    parts = []
+    if tables_raw is not None:
+        parts.append(f"[SQLite tables]\n{tables_raw}")
+    parts.extend(r for r in parallel_results if r is not None)
+
     logger.info(f"[gather_state] done in {time.perf_counter() - t0:.1f}s")
     return "\n\n".join(parts) if parts else "(no state available)"
 
