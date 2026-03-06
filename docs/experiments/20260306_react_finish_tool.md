@@ -1,7 +1,7 @@
 # 実験: react_finish_tool
 
 **日時**: 2026-03-06
-**ステータス**: 計画中
+**ステータス**: 結果記録済み
 
 ---
 
@@ -49,7 +49,84 @@ REACT_TERMINATION=finish_tool \
 
 ## 結果
 
-> 実験後に `/record-experiment 20260306_react_finish_tool` で記入
+**実行日時**: 2026-03-06 02:45
+**結果ディレクトリ**: test_results/bench_20260306_024521
+
+### ⚠️ 実験設定の問題
+
+`bench.sh` の `docker exec` に `-e REACT_TERMINATION` が含まれておらず、
+コンテナ側はデフォルトの `text` 戦略で動作した。
+本実験は実質的に **text 戦略のベースライン追加計測** となった。
+
+### メトリクス
+
+| モデル | TCA | StepCR | ErrRate | Replans | AvgTurns | AvgSec |
+|--------|-----|--------|---------|---------|----------|--------|
+| qwen2.5:14b | 0.933 | N/A | 0.067 | 0.0 | 4.3 | 1163 |
+
+### タスク別結果
+
+| タスク | 結果 | 所要時間 | Judge |
+|--------|------|---------|-------|
+| タスク1: SQLite + Python レポート | ❌ (timeout) | 1254s | 1/5 |
+| タスク2: Web 検索 → asyncio_notes.txt | ❌ (timeout) | 1301s | 1/5 |
+| タスク3: primes.py + review.txt | ❌ (成果物不完全) | 1020s | 2/5 |
+
+**Judge 合計**: 4/15（平均 1.3/5）
+
+---
+
+## 結果②（実際の finish_tool 実験）
+
+**実行日時**: 2026-03-06 09:31
+**結果ディレクトリ**: test_results/bench_20260306_093100
+
+### メトリクス（3タスク分のみ）
+
+| モデル | TCA | StepCR | ErrRate | Replans | AvgTurns | AvgSec |
+|--------|-----|--------|---------|---------|----------|--------|
+| qwen2.5:14b | 0.333 | N/A | 0.0 | 0.0 | 2.0 | 948 |
+
+※ metrics_snapshot に前回ベンチ残留3件が混入。この表は本ベンチ3タスク分のみを集計。
+
+### タスク別結果
+
+| タスク | 結果 | 所要時間 | Judge |
+|--------|------|---------|-------|
+| タスク1: SQLite INSERT → sales_report.txt | ❌ (timeout) | 1237s | 1/5 |
+| タスク2: Web 検索 → asyncio_notes.txt | ❌ (timeout) | 1248s | 1/5 |
+| タスク3: primes.py + review.txt | ❌ (LLM EOF エラー) | 359s | 0/5 |
+
+**Judge 合計**: 2/15（平均 0.7/5）
+
+### 動作詳細
+
+**タスク1**:
+- Turn1 (432s): INSERT 10件 ✅ → "OK: 10 rows affected"
+- Turn2 (340s): テキスト応答 → フィードバック注入（finish_tool 動作）
+- Turn3 (390s): テキスト応答 → フィードバック注入
+- Turn4: EXEC_TIMEOUT (1200s)
+- finish() 未呼び出し、sales_report.txt 未作成
+
+**タスク2**:
+- Turn1 (324s): web_search ✅ ("Python asyncio tutorial")
+- Turn2 (398s): fetch_page ✅ (realpython.com)
+- Turn3 (311s): テキスト応答 → フィードバック注入
+- Turn4: EXEC_TIMEOUT (1200s)
+- finish() 未呼び出し、asyncio_notes.txt 未作成
+
+**タスク3**:
+- Turn1 (350s): LLM ResponseError: unexpected EOF (status code: -1)
+- Ollama プロセスがクラッシュ、何も実行できず
+
+### 結論
+
+仮説の副作用リスクが両方とも顕在化した:
+1. **finish() を呼ばずフィードバックループに入る** → タスク1・2でタイムアウト
+2. **finish() の説明がなく呼び方を知らない** → モデルが finish ツールの存在を認識しないため
+3. タスク3はモデル崩壊（EOF エラー）
+
+finish_tool 戦略は現状のプロンプト（finish ツールの説明なし）では機能しない。
 
 ## 考察
 
