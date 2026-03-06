@@ -27,9 +27,12 @@ from core.utils import MetricsLogger, _sanitize
 def _react_variant() -> str:
     """Resolve the system-prompt variant for react mode.
 
+    react_zh_finish when PROMPT_VARIANT is 'zh' and REACT_TERMINATION is 'finish_tool',
     react_zh when PROMPT_VARIANT is 'zh', else react.
     """
-    return "react_zh" if PROMPT_VARIANT == "zh" else "react"
+    if PROMPT_VARIANT == "zh":
+        return "react_zh_finish" if REACT_TERMINATION == "finish_tool" else "react_zh"
+    return "react"
 
 
 async def run_react_loop(

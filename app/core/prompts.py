@@ -38,6 +38,9 @@ SENTENCES: dict[str, str] = {
     "replan_no_done_zh":"绝对不要重新包含已完成（✅）的步骤。",
     "replan_fix_zh":    "根据错误详情修正失败（❌）步骤的方法。",
     "replan_alt_zh":    "如果某个工具多次失败，请选择不同的工具或方法。",
+
+    # finish_tool termination strategy
+    "finish_tool_zh":   "当所有任务完成后，必须调用 finish(summary='...') 工具来结束会话。在调用 finish() 之前，请确认所有要求的文件和操作都已完成。",
 }
 
 # ── Fixed blocks (tool list and examples) ───────────────────────────────────
@@ -121,6 +124,13 @@ _SYSTEM_VARIANTS: dict[str, dict] = {
         "rules":    ["lang_zh", "use_tools_zh", "one_at_a_time_zh"],
         "examples": True,
         "footer":   ["arg_names_zh"],
+    },
+    # react_zh_finish: react_zh + finish() tool termination instruction
+    "react_zh_finish": {
+        "tool_list": _TOOL_LIST_ZH,
+        "rules":    ["lang_zh", "use_tools_zh", "one_at_a_time_zh"],
+        "examples": True,
+        "footer":   ["arg_names_zh", "finish_tool_zh"],
     },
 }
 
