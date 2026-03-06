@@ -17,9 +17,10 @@ import time
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from agent.base.termination import get_termination_strategy
+from agent.base.watchdog import get_react_watchdog
 from agent.components.loop_helpers import _apply_window, _invoke_tool, _trim_tool_result, apply_fixers
 from agent.components.planner import gather_current_state
-from config import EXEC_TIMEOUT, FEATURES, MAX_STEPS, PROMPT_VARIANT, REACT_TERMINATION
+from config import EXEC_TIMEOUT, FEATURES, MAX_STEPS, PROMPT_VARIANT, REACT_TERMINATION, REACT_WATCHDOG
 from core.prompts import build_system_prompt
 from core.utils import MetricsLogger, _sanitize
 
@@ -59,6 +60,7 @@ async def run_react_loop(
         human_content = f"Task: {prompt}"
 
     strategy = get_termination_strategy(REACT_TERMINATION)
+    watchdog = get_react_watchdog(REACT_WATCHDOG)
     llm_with_tools = model.bind_tools(tools + strategy.extra_tools)
     model_name: str = getattr(model, "model", "unknown")
     metrics = MetricsLogger(model_name=model_name, prompt=prompt)
@@ -69,6 +71,7 @@ async def run_react_loop(
     ]
 
     loop_start = time.perf_counter()
+    consecutive_errors = 0
 
     def _remaining() -> float:
         """Remaining seconds before EXEC_TIMEOUT (minimum 5s to avoid instant kill)."""
@@ -148,6 +151,15 @@ async def run_react_loop(
                 )
 
         messages.append(ToolMessage(content=ctx_result, tool_call_id=tc["id"]))
+
+        if is_error:
+            consecutive_errors += 1
+            hint = watchdog.check(consecutive_errors, result_str)
+            if hint:
+                logger.warning(f"[watchdog] {hint}")
+                messages.append(HumanMessage(content=hint))
+        else:
+            consecutive_errors = 0
 
     logger.warning("最大ステップ数に達しました。")
     metrics.write_summary([], termination="max_steps")

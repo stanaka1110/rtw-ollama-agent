@@ -26,6 +26,11 @@ TASK_ID:   str = os.environ.get("TASK_ID", "")
 #   "finish_tool" — loop ends only when the model calls finish()
 AGENT_MODE:        str = os.environ.get("AGENT_MODE", "plan_exec")
 REACT_TERMINATION: str = os.environ.get("REACT_TERMINATION", "text")
+# Watchdog strategy for the ReAct loop.
+# See app/agent/base/watchdog.py for available strategies.
+#   "none"        — no intervention (default)
+#   "consecutive" — inject feedback after N consecutive tool errors
+REACT_WATCHDOG:    str = os.environ.get("REACT_WATCHDOG", "none")
 
 MAX_STEPS = 30
 MAX_FAILURES_BEFORE_REPLAN = 1

@@ -41,15 +41,19 @@ set -euo pipefail
 TIER="${TIER:-medium}"
 PROMPT_VARIANT="${PROMPT_VARIANT:-default}"
 MODE="${MODE:-plan_exec}"
+REACT_TERMINATION="${REACT_TERMINATION:-text}"
+REACT_WATCHDOG="${REACT_WATCHDOG:-none}"
 MODELS=("qwen2.5:3b" "qwen2.5:7b" "qwen2.5:14b")
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --tier)    TIER="$2";                              shift 2 ;;
-        --prompt)  PROMPT_VARIANT="$2";                    shift 2 ;;
-        --mode)    MODE="$2";                              shift 2 ;;
-        --models)  IFS=',' read -r -a MODELS <<< "$2";    shift 2 ;;
-        *)         echo "Unknown option: $1" >&2; exit 1 ;;
+        --tier)               TIER="$2";                              shift 2 ;;
+        --prompt)             PROMPT_VARIANT="$2";                    shift 2 ;;
+        --mode)               MODE="$2";                              shift 2 ;;
+        --models)             IFS=',' read -r -a MODELS <<< "$2";    shift 2 ;;
+        --react-termination)  REACT_TERMINATION="$2";                 shift 2 ;;
+        --react-watchdog)     REACT_WATCHDOG="$2";                   shift 2 ;;
+        *)                    echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
 
@@ -95,7 +99,7 @@ mkdir -p "$RUN_DIR"
 RESULTS_FILE="$RUN_DIR/results.txt"
 
 echo "# Agent ベンチマーク  $(date '+%Y-%m-%d %H:%M')" | tee "$RESULTS_FILE"
-echo "# tier=$TIER  prompt=$PROMPT_VARIANT  mode=$MODE  models=${MODELS[*]}" | tee -a "$RESULTS_FILE"
+echo "# tier=$TIER  prompt=$PROMPT_VARIANT  mode=$MODE  react-termination=$REACT_TERMINATION  react-watchdog=$REACT_WATCHDOG  models=${MODELS[*]}" | tee -a "$RESULTS_FILE"
 echo "" | tee -a "$RESULTS_FILE"
 
 METRICS_LINES_BEFORE=$(docker exec langchain_app sh -c \
@@ -108,6 +112,8 @@ _run_task() {
         -e OLLAMA_MODEL="$MODEL" \
         -e PROMPT_VARIANT="$PROMPT_VARIANT" \
         -e AGENT_MODE="$MODE" \
+        -e REACT_TERMINATION="$REACT_TERMINATION" \
+        -e REACT_WATCHDOG="$REACT_WATCHDOG" \
         -e TASK_TIER="$TIER" \
         -e TASK_ID="$((TASK_IDX+1))" \
         -e LOG_LEVEL=DEBUG \
