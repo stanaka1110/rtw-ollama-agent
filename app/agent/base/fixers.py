@@ -170,6 +170,7 @@ _ARG_ALIAS: dict[str, str] = {
     "filename":     "path",
     "file_path":    "path",
     "text":         "content",
+    "value":        "content",
     "body":         "content",
     "data":         "content",
     "q":            "query",
