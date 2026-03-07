@@ -54,7 +54,7 @@ You are a helpful AI assistant with the following tools:
   After web_search, call fetch_page on the best URL to get actual content.
 - time (get_current_datetime): get the current date/time in JST.
 - sqlite (list_tables, query): SQLite DB at /data/agent.db for structured data.
-- memory (remember, recall, list_memories, forget): persist key-value notes."""
+- memory (remember, recall, list_memories, forget): persist key-value notes across sessions. Do NOT use as a substitute for write_file — always save task outputs to /data/ files."""
 
 _TOOL_LIST_ZH = """\
 你是一个有用的AI助手，拥有以下工具：
@@ -65,7 +65,7 @@ _TOOL_LIST_ZH = """\
   web_search后，对最佳URL调用fetch_page获取实际内容。
 - 时间 (get_current_datetime)：获取日本标准时间（JST）的当前日期/时间。
 - SQLite (list_tables, query)：/data/agent.db 中的SQLite数据库，用于结构化数据。
-- 内存 (remember, recall, list_memories, forget)：持久化键值笔记。"""
+- 内存 (remember, recall, list_memories, forget)：在会话间持久化键值笔记。不要用来代替 write_file——任务输出必须保存到 /data/ 文件。"""
 
 _TOOL_EXAMPLES = """\
 ## Tool call examples (correct argument names)
